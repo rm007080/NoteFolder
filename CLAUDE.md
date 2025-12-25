@@ -82,5 +82,29 @@ C:\Users\user1\Pictures\test.jpg → /mnt/c/Users/user1/Pictures/test.jpg
 ## 参照ドキュメント
 
 - **要件定義.md**: MVPスコープ、利用シーン、成功条件
-- **実装計画.md**: データ構造、処理フロー、実装ステップ
+- **実装計画.md**: データ構造、処理フロー、実装ステップ（v3修正版）
+- **アーキテクチャ.md**: システム設計、データフロー、セキュリティ対策
 - **参照ルール.md**: 禁止操作の完全リスト
+
+---
+
+## IMPORTANT - 実装上の注意（v3修正）
+
+### P0（重大）- 必ず守ること
+1. **tabs権限必須**: manifest.jsonに`"tabs"`権限を含めること
+2. **正しいAPIシグネチャ**: `chrome.storage.sync.get`は第1引数にデフォルト値オブジェクト、第2引数にコールバック
+   ```javascript
+   // ✅ 正しい
+   chrome.storage.sync.get({ key: defaultValue }, (result) => { ... });
+   // ❌ 間違い（動作しない）
+   chrome.storage.sync.get(['key'], { key: defaultValue });
+   ```
+
+### P1（高）- セキュリティ・安定性
+3. **lastErrorチェック必須**: 全storage操作で`chrome.runtime.lastError`を確認
+4. **XSS対策**: ユーザー入力は必ず`textContent`で表示（`innerHTML`禁止）
+5. **安全なURL解析**: `new URL()`でホスト名を厳密検証
+
+### P2（中）- データ整合性
+6. **個別キー方式**: プロジェクトは`project:{id}`形式で個別保存（8KB制限回避）
+7. **正規化タイミング**: `normalizeAllTags`は読み込み直後と保存前の両方で実行
