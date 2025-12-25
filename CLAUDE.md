@@ -8,7 +8,7 @@ NotebookLMのプロジェクトをタグで管理し、内容の記憶から再�
 
 ```
 NoteFolder/
-├── manifest.json              # Manifest V3定義（tabs権限必須）
+├── manifest.json              # Manifest V3定義
 ├── popup/
 │   ├── popup.html             # ポップアップUI
 │   ├── popup.css              # スタイル
@@ -17,9 +17,8 @@ NoteFolder/
 │   ├── icon16.png
 │   ├── icon48.png
 │   └── icon128.png
-├── 要件定義..md               # 詳細要件、MVPスコープ、成功条件
-├── 実装計画.md                # 技術仕様、データ構造、実装ステップ（v2修正版）
-├── アーキテクチャ.md          # システム設計、データフロー、セキュリティ
+├── 要件定義.md                # 詳細要件、MVPスコープ、成功条件
+├── 実装計画.md                # 技術仕様、データ構造、実装ステップ
 └── 参照ルール.md              # 禁止操作の完全リスト
 ```
 
@@ -83,15 +82,5 @@ C:\Users\user1\Pictures\test.jpg → /mnt/c/Users/user1/Pictures/test.jpg
 ## 参照ドキュメント
 
 - **要件定義.md**: MVPスコープ、利用シーン、成功条件
-- **実装計画.md**: データ構造、処理フロー、実装ステップ（v2修正版）
-- **アーキテクチャ.md**: システム設計、データフロー、セキュリティ対策
+- **実装計画.md**: データ構造、処理フロー、実装ステップ
 - **参照ルール.md**: 禁止操作の完全リスト
-
----
-
-## IMPORTANT - 実装上の注意（P0/P1修正）
-
-1. **tabs権限必須**: manifest.jsonに`"tabs"`権限を含めること（`chrome.tabs.query`に必要）
-2. **個別キー方式**: プロジェクトは`project:{id}`形式で個別保存（8KB制限回避）
-3. **XSS対策**: ユーザー入力は必ず`textContent`で表示（`innerHTML`禁止）
-4. **安全なURL解析**: `new URL()`でホスト名を厳密検証、正規表現のみは禁止
