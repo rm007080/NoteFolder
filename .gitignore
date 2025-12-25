@@ -1,0 +1,58 @@
+# Chrome拡張機能の成果物
+*.crx
+*.pem
+*.zip
+
+# スクリーンショット
+screenshots/
+
+# ビルド成果物
+dist/
+build/
+
+# Node.js（将来的にビルドツールを使用する場合）
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# 環境変数・秘密情報
+.env
+.env.*
+!.env.example
+
+# OS固有ファイル
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# エディタ・IDE設定
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# ログファイル
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# テンポラリファイル
+*.tmp
+*.temp
+.cache/
+
+# バックアップファイル
+*.bak
+*.backup
