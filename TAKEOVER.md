@@ -10,7 +10,7 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 
 ## 現在の進捗状況
 
-### 完了したステップ
+### 開発フェーズ: 完了 → 公開準備中
 
 | Step | 内容 | 状態 |
 |------|------|------|
@@ -25,10 +25,14 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 | Step 8 | スタイリング + UX改善 | ✅ 完了 |
 | Step 9 | デバッグログ削除 | ✅ 完了 |
 | Step 10 | キャッシュ化（パフォーマンス改善） | ✅ 完了 |
+| Step 11 | タグ削除機能（allTagsから完全削除） | ✅ 完了 |
+| Step 12 | フォルダアイコン消失問題の修正 | ✅ 完了 |
+| Step 13 | セキュリティレビュー + P2改善 | ✅ 完了 |
+| Step 14 | 公開準備（README、note記事下書き） | ✅ 完了 |
 
 ---
 
-## ✅ 直前に完了した機能（2025-12-28）
+## ✅ 直前に完了した作業（2025-12-28）
 
 ### 1. タグ削除機能
 
@@ -41,11 +45,11 @@ allTagsに登録されたタグを完全削除できる機能を追加。
 | 動作 | クリック→確認ダイアログ→OK→削除 |
 | 影響範囲 | allTags + 全プロジェクトからタグを削除 |
 
-#### 新規追加関数
+#### 追加関数
 
-| 関数 | 内容 |
-|------|------|
-| `removeTagFromAllProjects()` | allTagsと全プロジェクトからタグを一括削除 |
+| 関数 | 行番号（目安） | 内容 |
+|------|---------------|------|
+| `removeTagFromAllProjects()` | ~455 | allTagsと全プロジェクトからタグを一括削除 |
 
 ### 2. フォルダアイコン消失問題の修正
 
@@ -57,70 +61,66 @@ allTagsに登録されたタグを完全削除できる機能を追加。
 | 修正1 | `injectFolderIcon()`でDOM存在チェックを追加 |
 | 修正2 | `setupSectionToggleListener()`でセクション切り替え時に再注入 |
 
-#### 新規追加関数
+#### 追加関数
 
-| 関数 | 内容 |
-|------|------|
-| `setupSectionToggleListener()` | mat-button-toggle-groupのクリックを監視し、フォルダアイコンを再注入 |
+| 関数 | 行番号（目安） | 内容 |
+|------|---------------|------|
+| `setupSectionToggleListener()` | ~1455 | mat-button-toggle-groupのクリックを監視し、フォルダアイコンを再注入 |
 
----
+### 3. セキュリティレビュー実施
 
-## ✅ 以前に完了した機能
+Codex MCPによるセキュリティレビューを実施。
 
-### デバッグログ削除
+#### 結果サマリー
 
-`console.log`と`console.warn`をすべて削除。`console.error`のみ残存（エラーハンドリング用）。
+| 評価 | 件数 | 内容 |
+|------|------|------|
+| P0（重大） | 0件 | なし |
+| P1（高） | 0件 | なし |
+| P2（中） | 1件 | popup.jsのinnerHTML使用 → **修正済み** |
 
-| ファイル | 削除数 | 残存（error） |
-|----------|--------|---------------|
-| content/content.js | 27箇所 | 6箇所 |
-| popup/popup.js | 2箇所 | 1箇所 |
+#### 確認項目
 
-### chrome.storage.syncのキャッシュ化
+| # | 確認項目 | 結果 |
+|---|----------|------|
+| 1 | 外部通信 | なし（chrome.storage.syncのみ） |
+| 2 | 動的コード実行 | eval(), new Function()なし |
+| 3 | XSS脆弱性 | textContent使用、適切なサニタイズ |
+| 4 | 権限の妥当性 | storage + notebooklm.google.comのみ |
+| 5 | データ漏洩 | 外部送信なし |
+| 6 | 第三者スクリプト | 外部スクリプト読み込みなし |
+| 7 | クリックジャッキング | 不正UIなし |
+| 8 | CSP違反 | 違反なし |
 
-ストレージアクセスを大幅削減し、UI表示速度を向上。
+### 4. P2セキュリティ改善
 
-#### キャッシュ構造
+`popup/popup.js`の49-51行目を修正。
 
+**Before（innerHTML使用）**:
 ```javascript
-const cache = {
-  allTags: [],
-  projects: new Map(),  // projectId -> projectData
-  initialized: false
-};
-let cacheReadyPromise = null;
+projectIdElement.innerHTML =
+  'タグ管理はNotebookLMのプロジェクト一覧ページで行えます<br>' +
+  '<small style="color: #80868b;">登録済みタグ: ' + allTags.length + '個</small>';
 ```
 
-#### 新規追加関数（content.js:28-169）
+**After（DOM操作使用）**:
+```javascript
+projectIdElement.textContent = '';
+projectIdElement.appendChild(document.createTextNode('タグ管理は...'));
+projectIdElement.appendChild(document.createElement('br'));
+const small = document.createElement('small');
+small.style.color = '#80868b';
+small.textContent = '登録済みタグ: ' + allTags.length + '個';
+projectIdElement.appendChild(small);
+```
 
-| 関数 | 内容 |
-|------|------|
-| `initCache()` | 初期化時に全データをキャッシュに読み込み |
-| `ensureCacheReady()` | キャッシュ初期化完了を待機 |
-| `getCachedAllTags()` | allTagsをキャッシュから取得 |
-| `getCachedProject(projectId)` | 個別プロジェクトをキャッシュから取得 |
-| `getCachedAllProjectTags()` | 全プロジェクトのタグマップを取得 |
-| `updateCache(projectId, projectData, newAllTags)` | 書き込み成功後にキャッシュを更新 |
-| `setupStorageListener()` | 他タブからの変更を検知して同期 |
+### 5. 公開準備ファイル作成
 
-#### 変更された関数
-
-| 関数 | 変更内容 |
-|------|---------|
-| `addTagToProject()` | キャッシュから読み込み、SET成功後に更新 |
-| `removeTagFromProject()` | キャッシュから読み込み、SET成功後に更新 |
-| `showTagPopover()` | updateUI()がキャッシュからUI構築（非同期削除） |
-| `filterProjectsByTags()` | getCachedAllProjectTags()でタグマップ取得 |
-| `sortProjects()` | getCachedAllProjectTags()でタグマップ取得 |
-| `showTagDropdown()` | getCachedAllTags()でタグ取得（非同期削除） |
-| `updateFolderIconState()` | getCachedProject()で同期取得 |
-| `initNoteFolder()` | initCache().then()でキャッシュ初期化後にUI注入 |
-
-#### 効果
-
-- ストレージ読み込み: 初期化時の1回のみ
-- UI表示: 即時（非同期待ち不要）
-- 他タブ同期: `chrome.storage.onChanged`で自動更新
+| ファイル | 操作 | 内容 |
+|----------|------|------|
+| `.gitignore` | 更新 | CLAUDE.md, TAKEOVER.md, .claude/を除外に追加 |
+| `README.md` | 全面書き換え | インストール方法、使い方、注意事項を追加 |
+| `note記事下書き.md` | 新規作成 | note投稿用の記事下書き |
 
 ---
 
@@ -130,22 +130,25 @@ let cacheReadyPromise = null;
 NoteFolder/
 ├── manifest.json              # Content Script設定済み
 ├── content/
-│   ├── content.js             # メインロジック（約1490行）
-│   └── content.css            # スタイル（約480行）
+│   ├── content.js             # メインロジック（約1550行）
+│   └── content.css            # スタイル（約520行）
 ├── popup/
-│   ├── popup.html             # 設定画面（簡略化済み）
+│   ├── popup.html             # 設定画面
 │   ├── popup.css
-│   └── popup.js
+│   └── popup.js               # P2改善済み
 ├── icons/
 │   ├── icon16.png
 │   ├── icon48.png
 │   └── icon128.png
-├── 要件定義..md
-├── 実装計画.md                # v4版
-├── アーキテクチャ.md
-├── 参照ルール.md
-├── TAKEOVER.md                # この引き継ぎドキュメント
-└── CLAUDE.md                  # プロジェクト指示書
+├── README.md                  # 公開用（充実版）
+├── LICENSE                    # MITライセンス
+├── note記事下書き.md           # note投稿用下書き
+├── 要件定義..md               # 開発ドキュメント（公開）
+├── 実装計画.md                # 開発ドキュメント（公開）
+├── アーキテクチャ.md          # 開発ドキュメント（公開）
+├── 参照ルール.md              # 開発ドキュメント（公開）
+├── TAKEOVER.md                # この引き継ぎドキュメント（非公開）
+└── CLAUDE.md                  # プロジェクト指示書（非公開）
 ```
 
 ---
@@ -176,40 +179,79 @@ NoteFolder/
 | `ensureCacheReady()` | ~92 | キャッシュ初期化待機 |
 | `getCachedAllTags()` | ~106 | キャッシュからallTags取得 |
 | `getCachedProject()` | ~115 | キャッシュから個別プロジェクト取得 |
-| `getCachedAllProjectTags()` | ~123 | 全プロジェクトのタグマップ取得 |
 | `updateCache()` | ~137 | キャッシュ更新 |
 | `setupStorageListener()` | ~149 | onChangedリスナー登録 |
-| `setupKeyboardNavigation()` | ~234 | キーボードナビゲーション共通ロジック |
+| `setupKeyboardNavigation()` | ~241 | キーボードナビゲーション共通ロジック |
 | `addTagToProject()` | ~354 | タグ追加（キャッシュ対応） |
-| `removeTagFromProject()` | ~418 | タグ削除（キャッシュ対応） |
-| `showTagPopover()` | ~495 | ポップオーバー表示 |
-| `updateFolderIconState()` | ~760 | フォルダアイコン状態更新 |
-| `filterProjectsByTags()` | ~922 | フィルタリング処理 |
-| `sortProjects()` | ~991 | ソート処理 |
-| `showTagDropdown()` | ~1189 | タグ選択ドロップダウン |
-| `initNoteFolder()` | ~1450 | 初期化（キャッシュ初期化後にUI注入） |
+| `removeTagFromProject()` | ~418 | プロジェクトからタグ削除 |
+| `removeTagFromAllProjects()` | ~455 | allTagsからタグ完全削除 |
+| `showTagPopover()` | ~560 | ポップオーバー表示 |
+| `updateFolderIconState()` | ~825 | フォルダアイコン状態更新 |
+| `injectFolderIcon()` | ~848 | フォルダアイコン注入（DOM存在チェック付き） |
+| `filterProjectsByTags()` | ~990 | フィルタリング処理 |
+| `sortProjects()` | ~1055 | ソート処理 |
+| `showTagDropdown()` | ~1260 | タグ選択ドロップダウン（削除ボタン付き） |
+| `setupSectionToggleListener()` | ~1520 | セクション切り替え監視 |
+| `initNoteFolder()` | ~1555 | 初期化 |
 
-### DOM構造（NotebookLM）
+---
 
+## 公開準備 - 残りのユーザー作業
+
+### 1. スクリーンショットの撮影
+
+`screenshots/`フォルダを作成し、以下を撮影:
+
+| ファイル名 | 内容 |
+|------------|------|
+| `main.png` | メイン画面（📁アイコンが表示された状態） |
+| `add-tag.png` | タグ追加ポップオーバー |
+| `filter.png` | フィルター使用時 |
+| `extensions-page.png` | chrome://extensions画面 |
+| `loaded.png` | 拡張機能読み込み完了画面 |
+
+### 2. 配布用ZIPファイルの作成
+
+**含めるファイル**:
 ```
-div.project-buttons-flow      ← グリッドコンテナ
-  └── project-button          ← グリッドアイテム（フィルター/ソートはここに適用）
-        └── mat-card.project-button-card
-              └── [id^="project-"][id$="-emoji"]  ← プロジェクトID抽出元
+NoteFolder-v1.0.0/
+├── manifest.json
+├── content/
+├── popup/
+├── icons/
+├── README.md
+└── LICENSE
 ```
 
-### グリッドアイテム取得パターン
+**除外**: 開発ドキュメント、`.git/`、`CLAUDE.md`、`TAKEOVER.md`、`note記事下書き.md`
 
-```javascript
-// mat-cardからproject-button要素を取得
-const gridItem = card.closest('project-button') || card;
+### 3. Git操作
 
-// display制御
-gridItem.style.display = visible ? '' : 'none';
+```bash
+# mainブランチにマージ
+git checkout main
+git merge develop_2_cache
 
-// order制御
-gridItem.style.order = index;
+# タグを作成（公開版の目印）
+git tag v1.0.0
+
+# プッシュ
+git push origin main
+git push origin v1.0.0
 ```
+
+### 4. GitHub Releases作成
+
+1. GitHubリポジトリの「Releases」→「Create a new release」
+2. タグ: `v1.0.0`を選択
+3. タイトル: `v1.0.0 - 初回リリース`
+4. 説明を記入
+5. 配布用ZIPファイルをアップロード
+6. 「Publish release」
+
+### 5. note記事の投稿
+
+`note記事下書き.md`の内容をnoteに投稿し、スクリーンショットを追加。
 
 ---
 
@@ -228,26 +270,8 @@ gridItem.style.order = index;
 3. フォルダアイコン(📁)をクリック → ポップオーバー表示
 4. タグを追加/削除
 5. フィルターボタンでタグ選択 → プロジェクトがフィルタリング
-6. ソートボタンでソート選択 → プロジェクトが並び替え
-
-### キャッシュ動作確認
-
-1. 初回読み込み時にキャッシュが初期化されること
-2. タグ追加/削除後にUIが即座に更新されること
-3. 別タブでタグを変更した場合に同期されること
-
----
-
-## 将来のタスク
-
-### リリース前（必須）
-- [x] デバッグログ削除（console.log等の除去） ✅ 2025-12-28完了
-- [x] パフォーマンス改善（chrome.storage.syncのキャッシュ化） ✅ 2025-12-28完了
-
-### 追加機能（オプション）
-- [ ] ポップアップ画面での全タグ管理
-- [ ] MutationObserver拡張（SPA遷移時の状態再適用）
-- [ ] タグ付きプロジェクトのインジケーター表示強化
+6. タグドロップダウン内の×ボタン → タグ完全削除
+7. 「おすすめのノートブック」→「全て」で📁アイコンが再表示されること
 
 ---
 
@@ -255,16 +279,7 @@ gridItem.style.order = index;
 
 ### chrome.storage.sync エラー対策
 
-拡張機能のコンテキストが無効になると`chrome.storage.sync`がundefinedになる。対策として`isStorageAvailable()`関数を追加済み。エラーが発生したら：
-1. 拡張機能を一度削除
-2. 再度読み込み
-3. NotebookLMページをリロード
-
-### キャッシュの注意点
-
-- キャッシュは`initNoteFolder()`で`initCache()`を呼び出して初期化
-- 書き込み成功後のみ`updateCache()`でキャッシュを更新（失敗時は更新しない）
-- 他タブからの変更は`chrome.storage.onChanged`で検知してキャッシュを自動更新
+拡張機能のコンテキストが無効になると`chrome.storage.sync`がundefinedになる。対策として`isStorageAvailable()`関数を追加済み。
 
 ### 禁止操作（CLAUDE.mdより）
 
@@ -274,5 +289,5 @@ gridItem.style.order = index;
 ---
 
 **最終更新**: 2025-12-28
-**実装担当**: Claude Opus 4.5
-**進捗**: リリース前必須タスク完了（デバッグログ削除 + キャッシュ化）
+**実装担当**: Claude Opus 4.5 / Claude Sonnet 4
+**進捗**: 開発完了、公開準備完了（ユーザー作業待ち）
