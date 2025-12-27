@@ -607,6 +607,9 @@ let currentSortType = 'default';
 // フィルターUIが注入済みかどうか
 let filterUIInjected = false;
 
+// 元のカード順序を保持
+let originalCardOrder = [];
+
 /**
  * フィルターUIの配置先要素を検出する
  * @returns {HTMLElement|null}
@@ -640,17 +643,37 @@ function getProjectCards() {
 }
 
 /**
+ * 元のカード順序を保存
+ */
+function saveOriginalCardOrder() {
+  const cards = Array.from(getProjectCards());
+  if (cards.length > 0 && originalCardOrder.length === 0) {
+    originalCardOrder = cards;
+    console.log('Original card order saved:', originalCardOrder.length, 'cards');
+  }
+}
+
+/**
  * プロジェクトをタグでフィルタリング
  * @param {string[]} tags - フィルターするタグ（空配列なら全表示）
  */
 function filterProjectsByTags(tags) {
   console.log('Filtering by tags:', tags);
 
+  // 元の順序を使用（未保存なら現在のカードを使用）
+  const cards = originalCardOrder.length > 0
+    ? originalCardOrder
+    : Array.from(getProjectCards());
+
+  if (cards.length === 0) return;
+
   if (tags.length === 0) {
-    // フィルターなし: 全プロジェクト表示
-    getProjectCards().forEach(card => {
+    // フィルターなし: 全カード表示
+    cards.forEach(card => {
       card.style.display = '';
     });
+    // 現在のソート設定を再適用
+    sortProjects(currentSortType);
     return;
   }
 
@@ -671,9 +694,8 @@ function filterProjectsByTags(tags) {
 
     console.log('Project tags map:', projectTags);
 
-    // 各プロジェクトカードの表示/非表示を制御
-    getProjectCards().forEach(card => {
-      // カード内の絵文字要素からプロジェクトIDを取得
+    // 各カードの表示/非表示を制御
+    cards.forEach(card => {
       const emojiEl = card.querySelector(EMOJI_SELECTOR);
       if (!emojiEl) {
         card.style.display = '';
@@ -687,12 +709,15 @@ function filterProjectsByTags(tags) {
       }
 
       const cardTags = projectTags[projectId] || [];
-
-      // 選択されたタグのいずれかを持っているか
       const hasMatchingTag = tags.some(tag => cardTags.includes(tag));
 
       card.style.display = hasMatchingTag ? '' : 'none';
     });
+
+    // 現在のソート設定を再適用（orderプロパティで順序制御）
+    sortProjects(currentSortType);
+
+    console.log('Filtered by tags');
   });
 }
 
@@ -719,18 +744,19 @@ function sortProjects(sortType) {
   console.log('Sorting projects by:', sortType);
   currentSortType = sortType;
 
-  const cards = Array.from(getProjectCards());
-  if (cards.length === 0) return;
+  // 元の順序を基準にする
+  const allCards = originalCardOrder.length > 0
+    ? originalCardOrder
+    : Array.from(getProjectCards());
 
-  // 親要素を取得
-  const parent = cards[0].parentElement;
-  if (!parent) return;
+  if (allCards.length === 0) return;
 
-  // デフォルト順の場合は元の順序を復元（ページリロードが必要）
+  // デフォルト順の場合は元の順序（orderをリセット）
   if (sortType === 'default') {
-    // デフォルトはDOMの初期順序なので、何もしない
-    // 実際には元の順序を記録しておく必要があるが、簡易実装ではスキップ
-    console.log('Default sort - no reordering');
+    console.log('Default sort - restoring original order');
+    allCards.forEach((card, index) => {
+      card.style.order = index;
+    });
     return;
   }
 
@@ -749,37 +775,35 @@ function sortProjects(sortType) {
       }
     }
 
-    // カードをソート
-    const sortedCards = cards.sort((a, b) => {
-      const nameA = getProjectName(a);
-      const nameB = getProjectName(b);
+    // カードにソート用のデータを付与してソート
+    const cardsWithData = allCards.map(card => {
+      const nameVal = getProjectName(card);
+      const emojiEl = card.querySelector(EMOJI_SELECTOR);
+      const idVal = emojiEl ? extractProjectIdFromEmoji(emojiEl) : '';
+      const tagsVal = projectTags[idVal] || [];
+      return { card, name: nameVal, tags: tagsVal };
+    });
 
-      const emojiA = a.querySelector(EMOJI_SELECTOR);
-      const emojiB = b.querySelector(EMOJI_SELECTOR);
-      const idA = emojiA ? extractProjectIdFromEmoji(emojiA) : '';
-      const idB = emojiB ? extractProjectIdFromEmoji(emojiB) : '';
-
-      const tagsA = projectTags[idA] || [];
-      const tagsB = projectTags[idB] || [];
-
+    // ソート
+    cardsWithData.sort((a, b) => {
       switch (sortType) {
         case 'name-asc':
-          return nameA.localeCompare(nameB, 'ja');
+          return a.name.localeCompare(b.name, 'ja');
         case 'name-desc':
-          return nameB.localeCompare(nameA, 'ja');
+          return b.name.localeCompare(a.name, 'ja');
         case 'tags-desc':
-          return tagsB.length - tagsA.length;
+          return b.tags.length - a.tags.length;
         default:
           return 0;
       }
     });
 
-    // DOMを並び替え
-    sortedCards.forEach(card => {
-      parent.appendChild(card);
+    // CSS orderプロパティで順序を制御（DOMは移動しない）
+    cardsWithData.forEach((item, index) => {
+      item.card.style.order = index;
     });
 
-    console.log('Projects sorted');
+    console.log('Projects sorted by order property');
   });
 }
 
@@ -1166,6 +1190,8 @@ function initNoteFolder() {
     console.log(`Injection attempt ${attempt}/${maxAttempts}`);
     injectAllFolderIcons();
     injectFilterUI();
+    // 元のカード順序を保存（初回のみ）
+    saveOriginalCardOrder();
 
     // プロジェクトが見つからず、まだ試行回数が残っている場合は再試行
     if (processedProjects.size === 0 && attempt < maxAttempts) {
