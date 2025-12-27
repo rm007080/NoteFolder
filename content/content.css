@@ -1,0 +1,70 @@
+/* NoteFolder - Content Script Styles */
+/* Step 2: フォルダアイコンスタイル */
+
+/* ========================================
+   フォルダアイコン
+   ======================================== */
+
+.nf-folder-icon {
+  /* レイアウト */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 4px 6px;
+
+  /* 外観 */
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+
+  /* テキスト */
+  font-size: 18px;
+  line-height: 1;
+
+  /* アニメーション */
+  transition: all 0.2s ease;
+
+  /* その他 */
+  opacity: 0.6;
+}
+
+.nf-folder-icon:hover {
+  opacity: 1;
+  background-color: rgba(0, 0, 0, 0.05);
+  transform: scale(1.1);
+}
+
+.nf-folder-icon:active {
+  transform: scale(0.95);
+}
+
+.nf-folder-icon:focus {
+  outline: 2px solid #4285f4;
+  outline-offset: 2px;
+}
+
+/* タグ付きプロジェクトのインジケーター（将来実装） */
+.nf-folder-icon.has-tags {
+  opacity: 1;
+}
+
+.nf-folder-icon.has-tags::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  background-color: #4285f4;
+  border-radius: 50%;
+}
+
+/* ========================================
+   Step 3以降で実装予定
+   ======================================== */
+
+/* ポップオーバースタイル */
+/* フィルターUIスタイル */
+/* タグバッジスタイル */

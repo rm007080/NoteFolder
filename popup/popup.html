@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NoteFolder - 設定</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📓 NoteFolder</h1>
+    </header>
+
+    <section class="project-info">
+      <div id="project-id"></div>
+    </section>
+
+    <section class="settings-info">
+      <p style="font-size: 13px; color: #5f6368; margin: 16px 0;">
+        NotebookLMのプロジェクト一覧ページを開き、各プロジェクトの絵文字アイコン横のフォルダアイコンからタグを管理できます。
+      </p>
+    </section>
+
+    <!-- 将来的な拡張用: 全タグ一覧、タグ削除など -->
+    <section class="tag-input" style="display: none;">
+      <h2>タグを追加:</h2>
+      <div class="input-group">
+        <input type="text" id="tag-input" placeholder="入力...">
+        <button id="add-tag-btn">追加</button>
+      </div>
+      <div id="tag-suggestions" class="suggestions"></div>
+    </section>
+
+    <section class="current-tags" style="display: none;">
+      <h2>このプロジェクトのタグ:</h2>
+      <div id="tag-list" class="tag-container"></div>
+    </section>
+
+    <section class="filtered-projects" style="display: none;">
+      <h2 id="filter-title"></h2>
+      <div id="project-list"></div>
+    </section>
+
+    <section class="error-area">
+      <div id="error-area" style="display: none;"></div>
+    </section>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
