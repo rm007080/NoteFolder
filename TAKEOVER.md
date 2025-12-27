@@ -22,69 +22,44 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 | Step 5+ | タグ検索機能（ドロップダウン内） | ✅ 完了 |
 | Step 6 | ソート機能実装 | ✅ 完了 |
 | Step 7 | MutationObserver | ✅ 完了 |
-| Step 8 | スタイリング + UX改善 | 🚧 一部完了 |
+| Step 8 | スタイリング + UX改善 | ✅ 完了 |
 
 ---
 
-## 🔴 直前に実施した修正（要テスト）
+## ✅ 直前に完了した機能（2025-12-28）
 
-### 問題の概要
+### キーボードナビゲーション機能
 
-フィルター/ソート後のプロジェクトカード表示に問題があった：
+すべてのドロップダウン/ポップオーバーにキーボード操作を追加しました。
 
-1. **フィルター後の歯抜け状態**: タグでフィルタリングすると、非表示カードの場所が空きスペースとして残る
-2. **ソートが機能しない**: CSS orderプロパティが効かない
+#### 実装した機能
 
-### 原因分析（Phase 1で判明）
+| 対象 | キー操作 |
+|------|----------|
+| **タグ選択ドロップダウン** | ↑↓: アイテム移動、Enter: 選択、Esc: 閉じる、Tab: ソートボタンへ、Shift+Tab: フィルターボタンへ |
+| **ソートドロップダウン** | ↑↓: アイテム移動、Enter: 選択、Esc: 閉じる、Shift+Tab: フィルターボタンへ |
+| **タグ入力ポップオーバー** | ↑↓: 候補移動、Enter: 候補選択/タグ追加、Tab: 候補を入力欄に反映、Esc: 閉じる |
 
-NotebookLMのDOM構造を調査した結果：
+#### 変更ファイル
 
-```
-div.project-buttons-flow  ← グリッドコンテナ（CSS Grid）
-  └── project-button      ← グリッドアイテム（これを操作すべき）
-        └── mat-card.project-button-card  ← 従来操作していた要素
-```
+| ファイル | 変更内容 |
+|---------|----------|
+| `content/content.js` | `setupKeyboardNavigation`ヘルパー関数追加、各ドロップダウンへの適用 |
+| `content/content.css` | `.nf-keyboard-focus`ハイライトスタイル追加 |
 
-- **mat-grid-tileは存在しない**（Codexの分析は誤りだった）
-- `mat-card`に`display: none`や`order`を設定しても、親の`project-button`がグリッドアイテムなので効果がなかった
+#### 主な変更点
 
-### 実施した修正（Phase 2 & 3）
+1. **`setupKeyboardNavigation`関数** (content.js:91-167)
+   - 共通のキーボードナビゲーションロジック
+   - `onTab`コールバックでTab/Shift+Tab時の動作をカスタマイズ可能
 
-| 対象 | 変更前 | 変更後 |
-|------|--------|--------|
-| フィルター | `card.style.display = 'none'` | `card.closest('project-button').style.display = 'none'` |
-| ソート | `card.style.order = index` | `card.closest('project-button').style.order = index` |
+2. **ボタンの識別用属性** (content.js:1313, 1323)
+   - `data-nf-button="filter"` / `data-nf-button="sort"`
+   - Tab移動先の特定に使用
 
-**修正箇所**:
-- `filterProjectsByTags()` (content.js:674-741)
-- `sortProjects()` (content.js:774-857)
-
----
-
-## 🟡 次に確認すべきこと
-
-### 1. 修正のテスト（未実施）
-
-以下の動作確認が必要：
-
-| テスト | 期待結果 |
-|--------|----------|
-| タグフィルター | カードがグリッド表示のまま、歯抜けなしで表示 |
-| ソート（名前順 A→Z） | カードの順序が変わる |
-| ソート（デフォルト） | 元の順序に戻る |
-| フィルター解除（クリア） | 全カードが表示される |
-
-### 2. CSS orderがCSS Gridで効くか確認
-
-- CSS Gridで`order`プロパティが効くのは`grid-auto-flow`（自動配置）の場合のみ
-- NotebookLMが明示的にグリッド位置を指定している場合、`order`は効かない
-- 効かない場合は`appendChild`方式に切り替える必要がある
-
-### 3. Phase 4: MutationObserver拡張（保留中）
-
-NotebookLMのSPAでDOMが再生成された場合、`originalCardOrder`が無効になる可能性がある。必要に応じて：
-- 新しいタイル検知時に`originalCardOrder`を再取得
-- フィルター/ソートの状態を再適用
+3. **フィルタードロップダウンの自動フォーカス** (content.js:1281)
+   - ドロップダウン表示時に検索入力欄へ自動フォーカス
+   - クリック直後から矢印キーで操作可能
 
 ---
 
@@ -94,8 +69,8 @@ NotebookLMのSPAでDOMが再生成された場合、`originalCardOrder`が無効
 NoteFolder/
 ├── manifest.json              # Content Script設定済み
 ├── content/
-│   ├── content.js             # メインロジック（約1200行）
-│   └── content.css            # スタイル（約460行）
+│   ├── content.js             # メインロジック（約1400行）
+│   └── content.css            # スタイル（約480行）
 ├── popup/
 │   ├── popup.html             # 設定画面（簡略化済み）
 │   ├── popup.css
@@ -136,21 +111,22 @@ NoteFolder/
 
 | 関数 | 行番号 | 役割 |
 |------|--------|------|
+| `setupKeyboardNavigation()` | ~91 | キーボードナビゲーション共通ロジック |
 | `isStorageAvailable()` | ~14 | chrome.storage.sync利用可能チェック |
 | `showToast()` | ~65 | トースト通知表示 |
-| `validateTagName()` | ~96 | タグ名バリデーション |
-| `addTagToProject()` | ~131 | タグ追加 |
-| `removeTagFromProject()` | ~202 | タグ削除 |
-| `showTagPopover()` | ~288 | ポップオーバー表示 |
-| `injectFolderIcon()` | ~534 | フォルダアイコン注入 |
-| `getProjectCards()` | ~654 | プロジェクトカード取得 |
-| `saveOriginalCardOrder()` | ~662 | 元のカード順序保存 |
-| `filterProjectsByTags()` | ~674 | フィルタリング処理 ← **修正済み** |
-| `sortProjects()` | ~774 | ソート処理 ← **修正済み** |
-| `showTagDropdown()` | ~971 | タグ選択ドロップダウン |
-| `showSortDropdown()` | ~869 | ソートドロップダウン |
-| `injectFilterUI()` | ~1102 | フィルターUI注入 |
-| `initNoteFolder()` | ~1193 | 初期化 |
+| `validateTagName()` | ~172 | タグ名バリデーション |
+| `addTagToProject()` | ~207 | タグ追加 |
+| `removeTagFromProject()` | ~278 | タグ削除 |
+| `showTagPopover()` | ~364 | ポップオーバー表示（候補ナビゲーション対応） |
+| `injectFolderIcon()` | ~610 | フォルダアイコン注入 |
+| `getProjectCards()` | ~730 | プロジェクトカード取得 |
+| `saveOriginalCardOrder()` | ~738 | 元のカード順序保存 |
+| `filterProjectsByTags()` | ~750 | フィルタリング処理 |
+| `sortProjects()` | ~850 | ソート処理 |
+| `showSortDropdown()` | ~990 | ソートドロップダウン（キーボード対応） |
+| `showTagDropdown()` | ~1120 | タグ選択ドロップダウン（キーボード対応） |
+| `injectFilterUI()` | ~1300 | フィルターUI注入 |
+| `initNoteFolder()` | ~1380 | 初期化 |
 
 ### DOM構造（NotebookLM）
 
@@ -193,42 +169,27 @@ gridItem.style.order = index;
 5. フィルターボタンでタグ選択 → プロジェクトがフィルタリング
 6. ソートボタンでソート選択 → プロジェクトが並び替え
 
----
+### キーボードナビゲーションのテスト
 
-## 引き継ぎ時の最初のアクション
-
-1. **このファイルを読んで状況を把握**
-
-2. **修正のテストを実施**:
-   - 拡張機能を更新してNotebookLMをリロード
-   - フィルター/ソートの動作確認
-   - 歯抜け問題が解消されているか確認
-   - ソートが機能するか確認
-
-3. **テスト結果に応じた対応**:
-   - **成功**: Phase 4（MutationObserver拡張）を検討
-   - **orderが効かない場合**: `appendChild`方式に切り替え
-   - **その他の問題**: 原因調査
-
-4. **ソートがorderで効かない場合の修正方針**:
-   ```javascript
-   // sortProjects内で、orderではなくappendChildを使用
-   const parent = gridItem.parentElement;
-   cardsWithData.forEach((item) => {
-     const gridItem = item.card.closest('project-button') || item.card;
-     parent.appendChild(gridItem);
-   });
-   ```
+| テスト | 操作 | 期待結果 |
+|--------|------|----------|
+| フィルタードロップダウン | クリック → ↓キー | タグがハイライト |
+| Tab移動 | フィルタードロップダウン → Tab | ソートボタンにフォーカス |
+| Shift+Tab移動 | ソートドロップダウン → Shift+Tab | フィルターボタンにフォーカス |
+| タグ候補選択 | ポップオーバー入力 → ↓キー → Enter | 候補がタグとして追加 |
 
 ---
 
-## 将来のタスク（Step 8以降）
+## 将来のタスク
 
-- [ ] キーボードナビゲーション（ドロップダウン内でTab/矢印キー移動）
-- [ ] タグ付きプロジェクトのインジケーター表示（フォルダアイコンにドット）
-- [ ] ポップアップ画面での全タグ管理
-- [ ] デバッグログの削除（本番リリース前）
+### リリース前（必須）
+- [ ] デバッグログ削除（console.log等の除去）
 - [ ] パフォーマンス改善（chrome.storage.syncのキャッシュ化）
+
+### 追加機能（オプション）
+- [ ] ポップアップ画面での全タグ管理
+- [ ] MutationObserver拡張（SPA遷移時の状態再適用）
+- [ ] タグ付きプロジェクトのインジケーター表示強化
 
 ---
 
@@ -248,6 +209,6 @@ gridItem.style.order = index;
 
 ---
 
-**最終更新**: 2025-12-27
+**最終更新**: 2025-12-28
 **実装担当**: Claude Opus 4.5
-**進捗**: Phase 1-3完了・テスト待ち
+**進捗**: Step 8完了（キーボードナビゲーション実装済み）

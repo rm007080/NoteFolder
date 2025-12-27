@@ -95,8 +95,9 @@ function showToast(message) {
  * @param {function} onSelect - アイテム選択時のコールバック (item) => void
  * @param {function} onClose - 閉じる時のコールバック
  * @param {HTMLElement} [focusTarget] - キーイベントを監視する要素（省略時はcontainer）
+ * @param {function} [onTab] - Tabキー押下時のコールバック (shiftKey: boolean) => void
  */
-function setupKeyboardNavigation(container, itemSelector, onSelect, onClose, focusTarget = null) {
+function setupKeyboardNavigation(container, itemSelector, onSelect, onClose, focusTarget = null, onTab = null) {
   let currentIndex = -1;
   const eventTarget = focusTarget || container;
 
@@ -147,8 +148,12 @@ function setupKeyboardNavigation(container, itemSelector, onSelect, onClose, foc
         break;
 
       case 'Tab':
-        // Tabで閉じる（フォーカスが外れる）
-        onClose();
+        e.preventDefault();
+        if (onTab) {
+          onTab(e.shiftKey);
+        } else {
+          onClose();
+        }
         break;
     }
   };
@@ -1053,7 +1058,17 @@ function showSortDropdown(button) {
       // アイテムをクリックしたのと同じ動作
       item.click();
     },
-    closeDropdown
+    closeDropdown,
+    null,  // focusTarget（ドロップダウン自体を使用）
+    (shiftKey) => {
+      // Shift+Tab: フィルターボタンへ移動、Tab: ソートボタンへ戻る
+      closeDropdown();
+      if (shiftKey) {
+        document.querySelector('[data-nf-button="filter"]')?.focus();
+      } else {
+        document.querySelector('[data-nf-button="sort"]')?.focus();
+      }
+    }
   );
 
   // 外側クリックで閉じる
@@ -1238,7 +1253,16 @@ function showTagDropdown(button) {
         item.click();
       },
       closeDropdown,
-      searchInput  // 検索入力欄でキーイベントを監視
+      searchInput,  // 検索入力欄でキーイベントを監視
+      (shiftKey) => {
+        // Tab: ソートボタンへ移動、Shift+Tab: フィルターボタンへ戻る
+        closeDropdown();
+        if (shiftKey) {
+          document.querySelector('[data-nf-button="filter"]')?.focus();
+        } else {
+          document.querySelector('[data-nf-button="sort"]')?.focus();
+        }
+      }
     );
 
     // 位置を計算
@@ -1305,6 +1329,7 @@ function injectFilterUI() {
   // タグフィルターボタン
   const filterButton = document.createElement('button');
   filterButton.className = 'nf-filter-button';
+  filterButton.setAttribute('data-nf-button', 'filter');
   filterButton.innerHTML = '🏷️ タグ ▼';
   filterButton.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1314,6 +1339,7 @@ function injectFilterUI() {
   // ソートボタン
   const sortButton = document.createElement('button');
   sortButton.className = 'nf-sort-button';
+  sortButton.setAttribute('data-nf-button', 'sort');
   sortButton.innerHTML = '📊 デフォルト ▼';
   sortButton.addEventListener('click', (e) => {
     e.stopPropagation();
