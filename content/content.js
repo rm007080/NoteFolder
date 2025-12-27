@@ -45,12 +45,468 @@ function extractProjectIdFromEmoji(emojiElement) {
 }
 
 /**
- * トースト通知を表示する（簡易版）
+ * トースト通知を表示する
  * @param {string} message - 表示するメッセージ
  */
 function showToast(message) {
-  // TODO: Step 3以降で実装
-  console.log('Toast:', message);
+  // 既存のトーストを削除
+  const existingToast = document.querySelector('.nf-toast');
+  if (existingToast) {
+    existingToast.remove();
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'nf-toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+
+  // アニメーション用に少し遅延
+  setTimeout(() => toast.classList.add('nf-toast-show'), 10);
+
+  // 3秒後に消す
+  setTimeout(() => {
+    toast.classList.remove('nf-toast-show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// ========================================
+// バリデーション・ユーティリティ
+// ========================================
+
+/**
+ * タグ名のバリデーション
+ * @param {string} tag - タグ名
+ * @returns {{valid: boolean, tag?: string, error?: string}}
+ */
+function validateTagName(tag) {
+  if (!tag || !tag.trim()) {
+    return { valid: false, error: 'タグ名を入力してください' };
+  }
+
+  const trimmed = tag.trim();
+
+  if (trimmed.length > 50) {
+    return { valid: false, error: 'タグ名は50文字以内にしてください' };
+  }
+
+  return { valid: true, tag: trimmed };
+}
+
+/**
+ * allTagsを正規化（重複排除、空文字除去、ソート）
+ * @param {string[]} allTags
+ * @returns {string[]}
+ */
+function normalizeAllTags(allTags) {
+  return [...new Set(allTags)]
+    .filter(tag => tag && tag.trim())
+    .sort((a, b) => a.localeCompare(b, 'ja'));
+}
+
+// ========================================
+// ストレージ操作
+// ========================================
+
+/**
+ * プロジェクトにタグを追加
+ * @param {string} projectId
+ * @param {string} newTag
+ * @returns {Promise<boolean>}
+ */
+function addTagToProject(projectId, newTag) {
+  const validation = validateTagName(newTag);
+  if (!validation.valid) {
+    showToast(validation.error);
+    return Promise.resolve(false);
+  }
+
+  const normalizedTag = validation.tag;
+
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(
+      { [`project:${projectId}`]: null, allTags: [] },
+      (result) => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage read error:', chrome.runtime.lastError.message);
+          showToast('データの読み込みに失敗しました');
+          resolve(false);
+          return;
+        }
+
+        // プロジェクトデータを作成または更新
+        const project = result[`project:${projectId}`] || {
+          id: projectId,
+          name: '',
+          tags: [],
+          updatedAt: Date.now()
+        };
+
+        // 重複チェック
+        if (project.tags.includes(normalizedTag)) {
+          showToast('このタグは既に追加されています');
+          resolve(false);
+          return;
+        }
+
+        // タグ追加
+        project.tags.push(normalizedTag);
+        project.updatedAt = Date.now();
+
+        // allTags更新
+        let allTags = [...result.allTags];
+        if (!allTags.includes(normalizedTag)) {
+          allTags.push(normalizedTag);
+        }
+        allTags = normalizeAllTags(allTags);
+
+        // 保存
+        chrome.storage.sync.set(
+          { [`project:${projectId}`]: project, allTags: allTags },
+          () => {
+            if (chrome.runtime.lastError) {
+              console.error('Storage write error:', chrome.runtime.lastError.message);
+              showToast('タグの追加に失敗しました');
+              resolve(false);
+              return;
+            }
+            console.log('Tag added:', normalizedTag, 'to project:', projectId);
+            resolve(true);
+          }
+        );
+      }
+    );
+  });
+}
+
+/**
+ * プロジェクトからタグを削除
+ * @param {string} projectId
+ * @param {string} tagToRemove
+ * @returns {Promise<boolean>}
+ */
+function removeTagFromProject(projectId, tagToRemove) {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(
+      { [`project:${projectId}`]: null },
+      (result) => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage read error:', chrome.runtime.lastError.message);
+          showToast('データの読み込みに失敗しました');
+          resolve(false);
+          return;
+        }
+
+        const project = result[`project:${projectId}`];
+        if (!project) {
+          resolve(false);
+          return;
+        }
+
+        // タグを削除
+        project.tags = project.tags.filter(tag => tag !== tagToRemove);
+        project.updatedAt = Date.now();
+
+        // 保存
+        chrome.storage.sync.set(
+          { [`project:${projectId}`]: project },
+          () => {
+            if (chrome.runtime.lastError) {
+              console.error('Storage write error:', chrome.runtime.lastError.message);
+              showToast('タグの削除に失敗しました');
+              resolve(false);
+              return;
+            }
+            console.log('Tag removed:', tagToRemove, 'from project:', projectId);
+            resolve(true);
+          }
+        );
+      }
+    );
+  });
+}
+
+// ========================================
+// ポップオーバー
+// ========================================
+
+// 現在表示中のポップオーバー
+let currentPopover = null;
+
+/**
+ * ポップオーバーを非表示にする
+ */
+function hideTagPopover() {
+  if (currentPopover) {
+    currentPopover.remove();
+    currentPopover = null;
+  }
+}
+
+/**
+ * タグバッジを作成
+ * @param {string} tagName
+ * @param {function} onRemove - 削除時のコールバック
+ * @returns {HTMLElement}
+ */
+function createTagBadge(tagName, onRemove) {
+  const badge = document.createElement('span');
+  badge.className = 'nf-tag-badge';
+  badge.textContent = tagName;
+
+  const removeBtn = document.createElement('button');
+  removeBtn.className = 'nf-tag-badge-remove';
+  removeBtn.textContent = '×';
+  removeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    onRemove();
+  });
+
+  badge.appendChild(removeBtn);
+  return badge;
+}
+
+/**
+ * タグ入力ポップオーバーを表示
+ * @param {HTMLElement} targetElement - フォルダアイコン要素
+ * @param {string} projectId
+ */
+function showTagPopover(targetElement, projectId) {
+  // 既存のポップオーバーを閉じる
+  hideTagPopover();
+
+  // ポップオーバーを作成
+  const popover = document.createElement('div');
+  popover.className = 'nf-popover';
+  currentPopover = popover;
+
+  // ヘッダー
+  const header = document.createElement('div');
+  header.className = 'nf-popover-header';
+
+  const title = document.createElement('span');
+  title.className = 'nf-popover-title';
+  title.textContent = 'タグを管理';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'nf-popover-close';
+  closeBtn.textContent = '×';
+  closeBtn.addEventListener('click', hideTagPopover);
+
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+  popover.appendChild(header);
+
+  // タグ一覧コンテナ
+  const tagsContainer = document.createElement('div');
+  tagsContainer.className = 'nf-popover-tags';
+
+  const tagsLabel = document.createElement('div');
+  tagsLabel.className = 'nf-popover-label';
+  tagsLabel.textContent = '現在のタグ:';
+  tagsContainer.appendChild(tagsLabel);
+
+  const tagsList = document.createElement('div');
+  tagsList.className = 'nf-tags-list';
+  tagsContainer.appendChild(tagsList);
+
+  popover.appendChild(tagsContainer);
+
+  // 入力エリア
+  const inputContainer = document.createElement('div');
+  inputContainer.className = 'nf-popover-input-container';
+
+  const inputLabel = document.createElement('div');
+  inputLabel.className = 'nf-popover-label';
+  inputLabel.textContent = 'タグを追加:';
+  inputContainer.appendChild(inputLabel);
+
+  const inputRow = document.createElement('div');
+  inputRow.className = 'nf-input-row';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'nf-tag-input';
+  input.placeholder = '新しいタグを入力...';
+  input.maxLength = 50;
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'nf-add-btn';
+  addBtn.textContent = '追加';
+
+  inputRow.appendChild(input);
+  inputRow.appendChild(addBtn);
+  inputContainer.appendChild(inputRow);
+
+  // 候補リスト
+  const suggestionsList = document.createElement('div');
+  suggestionsList.className = 'nf-suggestions';
+  inputContainer.appendChild(suggestionsList);
+
+  popover.appendChild(inputContainer);
+
+  // ポップオーバー内のクリックイベントの伝播を止める
+  popover.addEventListener('click', (e) => {
+    e.stopPropagation();
+  });
+  popover.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+  });
+
+  // ポップオーバーを配置
+  document.body.appendChild(popover);
+
+  // 位置を計算
+  const rect = targetElement.getBoundingClientRect();
+  const popoverRect = popover.getBoundingClientRect();
+
+  let left = rect.left + window.scrollX;
+  let top = rect.bottom + window.scrollY + 8;
+
+  // 画面右端をはみ出す場合は左に寄せる
+  if (left + popoverRect.width > window.innerWidth) {
+    left = window.innerWidth - popoverRect.width - 16;
+  }
+
+  // 画面下端をはみ出す場合は上に表示
+  if (top + popoverRect.height > window.innerHeight + window.scrollY) {
+    top = rect.top + window.scrollY - popoverRect.height - 8;
+  }
+
+  popover.style.left = `${Math.max(8, left)}px`;
+  popover.style.top = `${Math.max(8, top)}px`;
+
+  // データを読み込んでUIを更新
+  const updateUI = () => {
+    chrome.storage.sync.get(
+      { [`project:${projectId}`]: null, allTags: [] },
+      (result) => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage read error:', chrome.runtime.lastError.message);
+          return;
+        }
+
+        const project = result[`project:${projectId}`];
+        const projectTags = project ? project.tags : [];
+        const allTags = result.allTags || [];
+
+        // タグ一覧を更新
+        tagsList.innerHTML = '';
+        if (projectTags.length === 0) {
+          const noTags = document.createElement('span');
+          noTags.className = 'nf-no-tags';
+          noTags.textContent = 'タグなし';
+          tagsList.appendChild(noTags);
+        } else {
+          projectTags.forEach(tag => {
+            const badge = createTagBadge(tag, async () => {
+              const success = await removeTagFromProject(projectId, tag);
+              if (success) {
+                updateUI();
+                updateFolderIconState(projectId);
+              }
+            });
+            tagsList.appendChild(badge);
+          });
+        }
+
+        // 候補更新関数
+        const updateSuggestions = (inputValue) => {
+          suggestionsList.innerHTML = '';
+          console.log('updateSuggestions called:', inputValue, 'allTags:', allTags, 'projectTags:', projectTags);
+          if (!inputValue.trim()) return;
+
+          const filtered = allTags.filter(tag =>
+            tag.toLowerCase().startsWith(inputValue.toLowerCase()) &&
+            !projectTags.includes(tag)
+          ).slice(0, 5);
+          console.log('Filtered suggestions:', filtered);
+
+          filtered.forEach(tag => {
+            const item = document.createElement('div');
+            item.className = 'nf-suggestion-item';
+            item.textContent = tag;
+            item.addEventListener('click', async () => {
+              const success = await addTagToProject(projectId, tag);
+              if (success) {
+                input.value = '';
+                suggestionsList.innerHTML = '';
+                updateUI();
+                updateFolderIconState(projectId);
+              }
+            });
+            suggestionsList.appendChild(item);
+          });
+        };
+
+        // 入力イベント
+        input.oninput = () => updateSuggestions(input.value);
+
+        // タグ追加処理
+        const handleAddTag = async () => {
+          const value = input.value.trim();
+          if (!value) return;
+
+          const success = await addTagToProject(projectId, value);
+          if (success) {
+            input.value = '';
+            suggestionsList.innerHTML = '';
+            updateUI();
+            updateFolderIconState(projectId);
+          }
+        };
+
+        addBtn.onclick = handleAddTag;
+        input.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            handleAddTag();
+          } else if (e.key === 'Escape') {
+            hideTagPopover();
+          }
+        };
+      }
+    );
+  };
+
+  updateUI();
+  input.focus();
+
+  // 外側クリックで閉じる
+  const handleClickOutside = (e) => {
+    if (!popover.contains(e.target) && !targetElement.contains(e.target)) {
+      hideTagPopover();
+      document.removeEventListener('click', handleClickOutside);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', handleClickOutside);
+  }, 0);
+}
+
+/**
+ * フォルダアイコンの状態を更新（タグ有無のインジケーター）
+ * @param {string} projectId
+ */
+function updateFolderIconState(projectId) {
+  const folderIcon = document.querySelector(`.nf-folder-icon[data-project-id="${projectId}"]`);
+  if (!folderIcon) return;
+
+  chrome.storage.sync.get(
+    { [`project:${projectId}`]: null },
+    (result) => {
+      if (chrome.runtime.lastError) return;
+
+      const project = result[`project:${projectId}`];
+      const hasTags = project && project.tags && project.tags.length > 0;
+
+      if (hasTags) {
+        folderIcon.classList.add('has-tags');
+      } else {
+        folderIcon.classList.remove('has-tags');
+      }
+    }
+  );
 }
 
 // ========================================
@@ -104,14 +560,25 @@ function injectFolderIcon(emojiElement) {
   console.log('Folder icon injected for project:', projectId);
   processedProjects.add(projectId);
 
-  // クリックイベント
-  folderIcon.addEventListener('click', (e) => {
-    e.stopPropagation();  // プロジェクトを開かないようにする
+  // クリックイベント（キャプチャフェーズで処理して確実にイベントを捕捉）
+  const handleClick = (e) => {
+    e.stopPropagation();
+    e.stopImmediatePropagation();
     e.preventDefault();
     console.log('Folder icon clicked for project:', projectId);
-    showToast(`プロジェクト ${projectId} のタグを管理`);
-    // TODO: Step 3でポップオーバー表示を実装
-  });
+    showTagPopover(folderIcon, projectId);
+  };
+
+  // 複数のイベントタイプでキャッチして確実に動作させる
+  folderIcon.addEventListener('click', handleClick, { capture: true });
+  folderIcon.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  }, { capture: true });
+  folderIcon.addEventListener('mouseup', (e) => {
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  }, { capture: true });
 }
 
 /**
@@ -125,6 +592,514 @@ function injectAllFolderIcons() {
   emojiElements.forEach((emojiElement) => {
     injectFolderIcon(emojiElement);
   });
+}
+
+// ========================================
+// フィルターUI
+// ========================================
+
+// 現在選択中のフィルタータグ
+let selectedFilterTags = [];
+
+// 現在のソート設定
+let currentSortType = 'default';
+
+// フィルターUIが注入済みかどうか
+let filterUIInjected = false;
+
+/**
+ * フィルターUIの配置先要素を検出する
+ * @returns {HTMLElement|null}
+ */
+function findFilterTargetElement() {
+  // mat-button-toggle-group（タブバー）を検索
+  const toggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
+  if (toggleGroup) {
+    console.log('Found toggle group for filter UI placement');
+    return toggleGroup;
+  }
+
+  // フォールバック: テキストで検索
+  const headers = document.querySelectorAll('h2, h3, div');
+  for (const el of headers) {
+    if (el.textContent.includes('最近のノートブック') ||
+        el.textContent.includes('Recent notebooks')) {
+      return el;
+    }
+  }
+  return null;
+}
+
+/**
+ * プロジェクトカード要素を取得
+ * @returns {NodeList}
+ */
+function getProjectCards() {
+  // mat-cardクラスを持つプロジェクトカードを検索
+  return document.querySelectorAll('mat-card.project-button-card');
+}
+
+/**
+ * プロジェクトをタグでフィルタリング
+ * @param {string[]} tags - フィルターするタグ（空配列なら全表示）
+ */
+function filterProjectsByTags(tags) {
+  console.log('Filtering by tags:', tags);
+
+  if (tags.length === 0) {
+    // フィルターなし: 全プロジェクト表示
+    getProjectCards().forEach(card => {
+      card.style.display = '';
+    });
+    return;
+  }
+
+  // ストレージから全プロジェクトのタグを取得
+  chrome.storage.sync.get(null, (items) => {
+    if (chrome.runtime.lastError) {
+      console.error('Storage read error:', chrome.runtime.lastError.message);
+      return;
+    }
+
+    // プロジェクトIDとタグのマッピングを作成
+    const projectTags = {};
+    for (const [key, value] of Object.entries(items)) {
+      if (key.startsWith('project:')) {
+        projectTags[value.id] = value.tags || [];
+      }
+    }
+
+    console.log('Project tags map:', projectTags);
+
+    // 各プロジェクトカードの表示/非表示を制御
+    getProjectCards().forEach(card => {
+      // カード内の絵文字要素からプロジェクトIDを取得
+      const emojiEl = card.querySelector(EMOJI_SELECTOR);
+      if (!emojiEl) {
+        card.style.display = '';
+        return;
+      }
+
+      const projectId = extractProjectIdFromEmoji(emojiEl);
+      if (!projectId) {
+        card.style.display = '';
+        return;
+      }
+
+      const cardTags = projectTags[projectId] || [];
+
+      // 選択されたタグのいずれかを持っているか
+      const hasMatchingTag = tags.some(tag => cardTags.includes(tag));
+
+      card.style.display = hasMatchingTag ? '' : 'none';
+    });
+  });
+}
+
+/**
+ * プロジェクトカードからプロジェクト名を取得
+ * @param {HTMLElement} card
+ * @returns {string}
+ */
+function getProjectName(card) {
+  // プロジェクト名を含む要素を探す
+  const titleEl = card.querySelector('.project-button-title, .mdc-card__title, [class*="title"]');
+  if (titleEl) {
+    return titleEl.textContent.trim();
+  }
+  // フォールバック: カード内のテキストを取得
+  return card.textContent.trim().slice(0, 50);
+}
+
+/**
+ * プロジェクトをソート
+ * @param {string} sortType - ソートタイプ ('default', 'name-asc', 'name-desc', 'tags-desc')
+ */
+function sortProjects(sortType) {
+  console.log('Sorting projects by:', sortType);
+  currentSortType = sortType;
+
+  const cards = Array.from(getProjectCards());
+  if (cards.length === 0) return;
+
+  // 親要素を取得
+  const parent = cards[0].parentElement;
+  if (!parent) return;
+
+  // デフォルト順の場合は元の順序を復元（ページリロードが必要）
+  if (sortType === 'default') {
+    // デフォルトはDOMの初期順序なので、何もしない
+    // 実際には元の順序を記録しておく必要があるが、簡易実装ではスキップ
+    console.log('Default sort - no reordering');
+    return;
+  }
+
+  // ストレージからタグ情報を取得してソート
+  chrome.storage.sync.get(null, (items) => {
+    if (chrome.runtime.lastError) {
+      console.error('Storage read error:', chrome.runtime.lastError.message);
+      return;
+    }
+
+    // プロジェクトIDとタグのマッピング
+    const projectTags = {};
+    for (const [key, value] of Object.entries(items)) {
+      if (key.startsWith('project:')) {
+        projectTags[value.id] = value.tags || [];
+      }
+    }
+
+    // カードをソート
+    const sortedCards = cards.sort((a, b) => {
+      const nameA = getProjectName(a);
+      const nameB = getProjectName(b);
+
+      const emojiA = a.querySelector(EMOJI_SELECTOR);
+      const emojiB = b.querySelector(EMOJI_SELECTOR);
+      const idA = emojiA ? extractProjectIdFromEmoji(emojiA) : '';
+      const idB = emojiB ? extractProjectIdFromEmoji(emojiB) : '';
+
+      const tagsA = projectTags[idA] || [];
+      const tagsB = projectTags[idB] || [];
+
+      switch (sortType) {
+        case 'name-asc':
+          return nameA.localeCompare(nameB, 'ja');
+        case 'name-desc':
+          return nameB.localeCompare(nameA, 'ja');
+        case 'tags-desc':
+          return tagsB.length - tagsA.length;
+        default:
+          return 0;
+      }
+    });
+
+    // DOMを並び替え
+    sortedCards.forEach(card => {
+      parent.appendChild(card);
+    });
+
+    console.log('Projects sorted');
+  });
+}
+
+/**
+ * ソートドロップダウンを表示
+ * @param {HTMLElement} button
+ */
+function showSortDropdown(button) {
+  // 既存のドロップダウンを削除
+  const existing = document.querySelector('.nf-sort-dropdown');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'nf-sort-dropdown';
+
+  const sortOptions = [
+    { value: 'default', label: 'デフォルト' },
+    { value: 'name-asc', label: '名前順 (A→Z)' },
+    { value: 'name-desc', label: '名前順 (Z→A)' },
+    { value: 'tags-desc', label: 'タグ数 (多→少)' }
+  ];
+
+  sortOptions.forEach(option => {
+    const item = document.createElement('div');
+    item.className = 'nf-sort-item';
+    if (currentSortType === option.value) {
+      item.classList.add('selected');
+    }
+
+    const radio = document.createElement('span');
+    radio.className = 'nf-sort-radio';
+    radio.textContent = currentSortType === option.value ? '●' : '○';
+
+    const label = document.createElement('span');
+    label.textContent = option.label;
+
+    item.appendChild(radio);
+    item.appendChild(label);
+
+    item.addEventListener('click', () => {
+      sortProjects(option.value);
+      // ボタンのテキストを更新
+      button.textContent = `📊 ${option.label} ▼`;
+      dropdown.remove();
+    });
+
+    dropdown.appendChild(item);
+  });
+
+  // 位置を計算
+  const rect = button.getBoundingClientRect();
+  dropdown.style.position = 'fixed';
+  dropdown.style.top = `${rect.bottom + 4}px`;
+  dropdown.style.left = `${rect.left}px`;
+
+  document.body.appendChild(dropdown);
+
+  // 外側クリックで閉じる
+  const handleClickOutside = (e) => {
+    if (!dropdown.contains(e.target) && !button.contains(e.target)) {
+      dropdown.remove();
+      document.removeEventListener('click', handleClickOutside);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', handleClickOutside);
+  }, 0);
+}
+
+/**
+ * フィルターUIを更新（選択中タグの表示）
+ */
+function updateFilterUI() {
+  const selectedContainer = document.querySelector('.nf-filter-selected');
+  if (!selectedContainer) return;
+
+  selectedContainer.innerHTML = '';
+
+  if (selectedFilterTags.length === 0) {
+    const placeholder = document.createElement('span');
+    placeholder.className = 'nf-filter-placeholder';
+    placeholder.textContent = 'タグを選択してフィルター';
+    selectedContainer.appendChild(placeholder);
+  } else {
+    selectedFilterTags.forEach(tag => {
+      const badge = document.createElement('span');
+      badge.className = 'nf-filter-badge';
+      badge.textContent = tag;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'nf-filter-badge-remove';
+      removeBtn.textContent = '×';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedFilterTags = selectedFilterTags.filter(t => t !== tag);
+        updateFilterUI();
+        filterProjectsByTags(selectedFilterTags);
+      });
+
+      badge.appendChild(removeBtn);
+      selectedContainer.appendChild(badge);
+    });
+
+    // クリアボタン
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'nf-filter-clear';
+    clearBtn.textContent = 'クリア';
+    clearBtn.addEventListener('click', () => {
+      selectedFilterTags = [];
+      updateFilterUI();
+      filterProjectsByTags([]);
+    });
+    selectedContainer.appendChild(clearBtn);
+  }
+}
+
+/**
+ * タグ選択ドロップダウンを表示
+ * @param {HTMLElement} button - ドロップダウンボタン
+ */
+function showTagDropdown(button) {
+  // 既存のドロップダウンを削除
+  const existing = document.querySelector('.nf-tag-dropdown');
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'nf-tag-dropdown';
+
+  // ストレージからタグを取得
+  chrome.storage.sync.get({ allTags: [] }, (result) => {
+    if (chrome.runtime.lastError) {
+      console.error('Storage read error:', chrome.runtime.lastError.message);
+      return;
+    }
+
+    const allTags = result.allTags || [];
+
+    // 検索入力欄を追加
+    const searchContainer = document.createElement('div');
+    searchContainer.className = 'nf-dropdown-search';
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'nf-dropdown-search-input';
+    searchInput.placeholder = '🔍 タグを検索...';
+
+    searchContainer.appendChild(searchInput);
+    dropdown.appendChild(searchContainer);
+
+    // タグリストコンテナ
+    const tagListContainer = document.createElement('div');
+    tagListContainer.className = 'nf-dropdown-list';
+    dropdown.appendChild(tagListContainer);
+
+    // タグリストを描画する関数
+    const renderTagList = (filterText = '') => {
+      tagListContainer.innerHTML = '';
+
+      const filteredTags = allTags.filter(tag =>
+        tag.toLowerCase().includes(filterText.toLowerCase())
+      );
+
+      if (filteredTags.length === 0) {
+        const noTags = document.createElement('div');
+        noTags.className = 'nf-dropdown-empty';
+        noTags.textContent = filterText ? '一致するタグがありません' : 'タグがありません';
+        tagListContainer.appendChild(noTags);
+        return;
+      }
+
+      filteredTags.forEach(tag => {
+        const item = document.createElement('div');
+        item.className = 'nf-dropdown-item';
+        if (selectedFilterTags.includes(tag)) {
+          item.classList.add('selected');
+        }
+
+        const checkbox = document.createElement('span');
+        checkbox.className = 'nf-dropdown-checkbox';
+        checkbox.textContent = selectedFilterTags.includes(tag) ? '✓' : '';
+
+        const label = document.createElement('span');
+        label.textContent = tag;
+
+        item.appendChild(checkbox);
+        item.appendChild(label);
+
+        item.addEventListener('click', () => {
+          if (selectedFilterTags.includes(tag)) {
+            selectedFilterTags = selectedFilterTags.filter(t => t !== tag);
+            item.classList.remove('selected');
+            checkbox.textContent = '';
+          } else {
+            selectedFilterTags.push(tag);
+            item.classList.add('selected');
+            checkbox.textContent = '✓';
+          }
+          updateFilterUI();
+          filterProjectsByTags(selectedFilterTags);
+        });
+
+        tagListContainer.appendChild(item);
+      });
+    };
+
+    // 初期描画
+    renderTagList();
+
+    // 検索入力イベント
+    searchInput.addEventListener('input', () => {
+      renderTagList(searchInput.value);
+    });
+
+    // Escapeキーで閉じる
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        dropdown.remove();
+      }
+    });
+
+    // 位置を計算
+    const rect = button.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+
+    // 下方向のスペースを確認
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const dropdownHeight = Math.min(240, allTags.length * 40 + 20); // 推定高さ
+
+    if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
+      // 上に表示
+      dropdown.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+      dropdown.style.top = 'auto';
+    } else {
+      // 下に表示
+      dropdown.style.top = `${rect.bottom + 4}px`;
+      dropdown.style.bottom = 'auto';
+    }
+
+    dropdown.style.left = `${rect.left}px`;
+
+    // 右端をはみ出さないように調整
+    document.body.appendChild(dropdown);
+    const dropdownRect = dropdown.getBoundingClientRect();
+    if (dropdownRect.right > window.innerWidth) {
+      dropdown.style.left = `${window.innerWidth - dropdownRect.width - 8}px`;
+    }
+
+    // 外側クリックで閉じる
+    const handleClickOutside = (e) => {
+      if (!dropdown.contains(e.target) && !button.contains(e.target)) {
+        dropdown.remove();
+        document.removeEventListener('click', handleClickOutside);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', handleClickOutside);
+    }, 0);
+  });
+}
+
+/**
+ * フィルターUIを注入
+ */
+function injectFilterUI() {
+  if (filterUIInjected) return;
+
+  const targetElement = findFilterTargetElement();
+  if (!targetElement) {
+    console.log('Filter target element not found');
+    return;
+  }
+
+  console.log('Injecting filter UI near:', targetElement);
+
+  // フィルターUIコンテナ（コンパクト版）
+  const filterContainer = document.createElement('div');
+  filterContainer.className = 'nf-filter-container';
+
+  // タグフィルターボタン
+  const filterButton = document.createElement('button');
+  filterButton.className = 'nf-filter-button';
+  filterButton.innerHTML = '🏷️ タグ ▼';
+  filterButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showTagDropdown(filterButton);
+  });
+
+  // ソートボタン
+  const sortButton = document.createElement('button');
+  sortButton.className = 'nf-sort-button';
+  sortButton.innerHTML = '📊 デフォルト ▼';
+  sortButton.addEventListener('click', (e) => {
+    e.stopPropagation();
+    showSortDropdown(sortButton);
+  });
+
+  // 選択中タグ表示エリア
+  const selectedContainer = document.createElement('div');
+  selectedContainer.className = 'nf-filter-selected';
+
+  filterContainer.appendChild(filterButton);
+  filterContainer.appendChild(sortButton);
+  filterContainer.appendChild(selectedContainer);
+
+  // mat-button-toggle-groupの場合は直後に挿入
+  if (targetElement.tagName.toLowerCase() === 'mat-button-toggle-group') {
+    targetElement.parentNode.insertBefore(filterContainer, targetElement.nextSibling);
+  } else {
+    // フォールバック: ヘッダーの後に挿入
+    targetElement.parentNode.insertBefore(filterContainer, targetElement.nextSibling);
+  }
+
+  filterUIInjected = true;
+  console.log('Filter UI injected');
 }
 
 // ========================================
@@ -190,6 +1165,7 @@ function initNoteFolder() {
   const tryInject = (attempt = 1, maxAttempts = 5) => {
     console.log(`Injection attempt ${attempt}/${maxAttempts}`);
     injectAllFolderIcons();
+    injectFilterUI();
 
     // プロジェクトが見つからず、まだ試行回数が残っている場合は再試行
     if (processedProjects.size === 0 && attempt < maxAttempts) {
