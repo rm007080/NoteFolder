@@ -56,3 +56,8 @@ yarn-error.log*
 # バックアップファイル
 *.bak
 *.backup
+
+# Claude Code専用ファイル（公開しない）
+CLAUDE.md
+TAKEOVER.md
+.claude/

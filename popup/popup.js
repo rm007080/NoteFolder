@@ -46,9 +46,14 @@ function displayAllTags() {
     // 現在は開発情報として表示
     const projectIdElement = document.getElementById('project-id');
     if (projectIdElement && allTags.length > 0) {
-      projectIdElement.innerHTML =
-        'タグ管理はNotebookLMのプロジェクト一覧ページで行えます<br>' +
-        '<small style="color: #80868b;">登録済みタグ: ' + allTags.length + '個</small>';
+      // セキュリティ対策: innerHTMLではなくDOM操作を使用
+      projectIdElement.textContent = '';
+      projectIdElement.appendChild(document.createTextNode('タグ管理はNotebookLMのプロジェクト一覧ページで行えます'));
+      projectIdElement.appendChild(document.createElement('br'));
+      const small = document.createElement('small');
+      small.style.color = '#80868b';
+      small.textContent = '登録済みタグ: ' + allTags.length + '個';
+      projectIdElement.appendChild(small);
     }
   });
 }
