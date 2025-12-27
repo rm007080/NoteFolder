@@ -1,200 +1,266 @@
-● NoteFolder開発 - 詳細な引き継ぎプロンプト
+# NoteFolder開発 - 詳細な引き継ぎプロンプト
 
-  プロジェクト概要
+## プロジェクト概要
 
-  NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡張機能（Manifest V3）を開発中。外部サーバー不要、chrome.storage.syncでデータ管理。
+NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡張機能（Manifest V3）を開発中。外部サーバー不要、chrome.storage.syncでデータ管理。
 
-  プロジェクトパス: /mnt/c/Users/littl/app-dev/06_NoteFolder/NoteFolder
+**プロジェクトパス**: `/mnt/c/Users/littl/app-dev/06_NoteFolder/NoteFolder`
 
-  重要な仕様変更（v4）
+---
 
-  - v3以前: 個別プロジェクトページ(/notebook/{id})で動作、ポップアップ方式
-  - v4（現在）: プロジェクト一覧ページ(https://notebooklm.google.com/)で動作、Content Script方式に変更
-  - 理由: ユーザー要件により、一覧ページの各プロジェクト横にフォルダアイコンを配置し、タグでフィルタリング可能にする
+## 現在の進捗状況
 
-  現在の進捗状況
+### 完了したステップ
 
-  ✅ 完了した作業
+| Step | 内容 | 状態 |
+|------|------|------|
+| Step 1 | manifest.json更新（Content Script設定） | ✅ 完了 |
+| Step 2 | フォルダアイコン注入 + クリックイベント | ✅ 完了 |
+| Step 3 | タグ入力ポップオーバー | ✅ 完了 |
+| Step 4 | タグ保存・読込（chrome.storage.sync） | ✅ 完了（Step 3に含む） |
+| Step 5 | フィルターUI実装 | ✅ 完了 |
+| Step 5+ | タグ検索機能（ドロップダウン内） | ✅ 完了 |
+| Step 6 | ソート機能実装 | ✅ 基本実装完了 |
+| Step 7 | MutationObserver | ✅ 完了（Step 2に含む） |
+| Step 8 | スタイリング + UX改善 | 🚧 未着手 |
 
-  Step 1: Content Script設定（完了）
+---
 
-  - manifest.json更新: Content Script設定追加、不要なtabs・activeTab権限削除
-  - content/content.js作成: 基本構造
-  - content/content.css作成: スタイルファイル
-  - popup.js/html簡略化: URL解析エラー対応、設定画面用に変更
+## 🔴 次に対応すべき重要な問題
 
-  Step 2: フォルダアイコン注入（実装完了・テスト待ち）
+### 問題の概要
 
-  - DOM構造確認: 絵文字要素 <div id="project-{uuid}-emoji">📘</div> を特定
-  - MutationObserver実装: 動的に追加されるプロジェクトに対応
-  - 複数回試行ロジック: ページ読み込み時に要素が見つからない場合、最大5回再試行
-  - 重複注入防止: processedProjects Setで管理
+フィルター/ソート後のプロジェクトカード表示に問題がある:
 
-  現在の状態: 実装完了、ユーザーのテスト結果待ち
+1. **フィルター後の歯抜け状態**: タグでフィルタリングすると、非表示カードの場所が空きスペースとして残り、カードが歯抜け状態になる
+2. **ソート後のレイアウト崩れ**: ソート後にカードが一列に並んでしまう
+3. **デフォルト復元不可**: 「デフォルト」ソートを選択しても元の順序に戻らない
 
-  🚧 未完了のタスク
+### 問題の原因
 
-  - Step 2テスト: フォルダアイコンが正しく表示されるか確認
-  - Step 3: タグ入力ポップオーバー実装
-  - Step 4: タグ保存・読込（chrome.storage.sync）
-  - Step 5: フィルターUI実装
-  - Step 6: ソート機能実装
-  - Step 7: MutationObserver（✅すでに実装済み）
-  - Step 8: スタイリング + UX改善
+現在の実装:
+- フィルタリング: `card.style.display = 'none'` で非表示
+- ソート: `parent.appendChild(card)` でDOM並び替え
 
-  技術的な重要事項
+NotebookLMのCSS Gridレイアウトでは、`display: none`にしたカードの「位置」が空きスペースとして残る。
 
-  DOM構造（NotebookLM）
+### 修正方針
 
-  <div class="project-button-box">
-    <div class="project-button-box-icon"
-         id="project-955c465a-0662-41c0-ac1a-48e1c71d1837-emoji">📘</div>
-    <!-- ここにフォルダアイコンを注入 -->
-  </div>
+```javascript
+// 修正のポイント:
+// 1. 初期化時に元のカード順序を記録
+// 2. フィルター/ソート時は該当カードをDOMに順番に再配置（appendChild）
+// 3. 非表示カードは display:none ではなく、DOMから一時的に除外するか、
+//    表示カードだけを順番にappendChildして自然に左詰めにする
+// 4. デフォルト選択時は記録した元の順序で再配置
+```
 
-  セレクタ: [id^="project-"][id$="-emoji"]
-  プロジェクトID抽出: id.match(/^project-(.+)-emoji$/)[1]
+### 修正すべき関数
 
-  データ構造（chrome.storage.sync）
+1. **`filterProjectsByTags()`** (content.js:644-697)
+   - 現在: `card.style.display = hasMatchingTag ? '' : 'none'`
+   - 修正後: 表示するカードだけを`parent.appendChild(card)`で再配置
 
-  {
-    "project:{uuid}": {
-      "id": "uuid",
-      "name": "プロジェクト名",
-      "tags": ["AI", "学習"],
-      "updatedAt": 1703123456789
-    },
-    "allTags": ["AI", "リサーチ", "仕事", "学習"]  // ソート済み
+2. **`sortProjects()`** (content.js:718-783)
+   - 現在: ソート後にappendChildしているが、非表示カードも含めている
+   - 修正後: 表示中のカードだけをソート・再配置
+
+3. **新規: 元の順序を記録する仕組み**
+   - 初期化時に`originalCardOrder`配列に保存
+   - 「デフォルト」選択時にこの順序で復元
+
+### 参考: 修正イメージ
+
+```javascript
+// グローバル変数として追加
+let originalCardOrder = [];
+
+// 初期化時に元の順序を記録
+function saveOriginalCardOrder() {
+  originalCardOrder = Array.from(getProjectCards());
+}
+
+// フィルター処理の修正版
+function filterProjectsByTags(tags) {
+  const cards = originalCardOrder.length > 0
+    ? originalCardOrder
+    : Array.from(getProjectCards());
+
+  if (cards.length === 0) return;
+  const parent = cards[0].parentElement;
+
+  // 全カードを一度非表示
+  cards.forEach(card => card.style.display = 'none');
+
+  if (tags.length === 0) {
+    // フィルターなし: 元の順序で全表示
+    cards.forEach(card => {
+      card.style.display = '';
+      parent.appendChild(card);
+    });
+    return;
   }
 
-  重要な実装詳細
+  // フィルター適用: 該当カードだけを順番に再配置
+  // ... ストレージからタグ情報取得後 ...
+  cards.forEach(card => {
+    const hasMatchingTag = /* タグチェック */;
+    if (hasMatchingTag) {
+      card.style.display = '';
+      parent.appendChild(card);
+    }
+  });
+}
+```
 
-  1. MutationObserver (content/content.js:137):
-    - 動的に追加されるプロジェクトを検出
-    - 絵文字要素が追加されたら即座にフォルダアイコン注入
-  2. 処理済み追跡 (content/content.js:14):
-  const processedProjects = new Set();
-    - 重複注入防止
-  3. 複数回試行 (content/content.js:190):
-    - 初回500ms後に開始、見つからなければ1秒間隔で最大5回
-  4. XSS対策:
-    - textContent使用必須、innerHTML禁止
-  5. エラーハンドリング:
-    - 全storage操作でchrome.runtime.lastErrorチェック
+---
 
-  ファイル構成
+## 実装済み機能の詳細
 
-  NoteFolder/
-  ├── manifest.json              # Content Script設定済み
-  ├── content/
-  │   ├── content.js             # MutationObserver実装済み
-  │   └── content.css            # フォルダアイコンスタイル
-  ├── popup/
-  │   ├── popup.html             # 簡略化済み（設定画面）
-  │   ├── popup.css
-  │   └── popup.js               # URL解析削除済み
-  ├── icons/
-  │   ├── icon16.png
-  │   ├── icon48.png
-  │   └── icon128.png
-  ├── 要件定義..md
-  ├── 実装計画.md                # v4版に更新済み
-  ├── アーキテクチャ.md
-  ├── 参照ルール.md
-  └── CLAUDE.md                  # プロジェクト指示書
+### フォルダアイコン（Step 2）
 
-  既知の問題と対処済み事項
+- **セレクタ**: `[id^="project-"][id$="-emoji"]`
+- **プロジェクトID抽出**: `id.match(/^project-(.+)-emoji$/)[1]`
+- **クリックイベント**: キャプチャフェーズで処理（`{ capture: true }`）
+- **イベント伝播停止**: `stopPropagation()` + `stopImmediatePropagation()`
 
-  解決済み
+### タグ入力ポップオーバー（Step 3）
 
-  1. popup.jsのURL解析エラー:
-    - 原因: tabs権限削除によりtabs[0].urlがundefined
-    - 対処: popup.jsを簡略化、設定画面用に変更
-  2. プロジェクト検出失敗:
-    - 原因: ページ読み込み1秒後にはDOM未構築
-    - 対処: MutationObserver + 複数回試行実装
-  3. 拡張機能キャッシュエラー:
-    - 対処方法: chrome://extensionsで削除→再読み込み
+- **showTagPopover()**: フォルダアイコンクリックで表示
+- **タグ追加**: `addTagToProject(projectId, tag)`
+- **タグ削除**: `removeTagFromProject(projectId, tag)`
+- **タグ候補**: 入力に応じて前方一致でフィルタリング
+- **XSS対策**: `textContent`使用、`innerHTML`禁止
 
-  テスト方法
+### フィルターUI（Step 5）
 
-  拡張機能の更新
+- **配置場所**: `mat-button-toggle-group.project-section-toggle` の直後
+- **タグ選択**: ドロップダウン + 検索機能付き
+- **選択中タグ表示**: バッジ形式、個別削除・一括クリア可能
 
-  1. chrome://extensions
-  2. NoteFolderの「更新」ボタン
-  3. NotebookLMページをリロード
+### ソート機能（Step 6）
 
-  動作確認
+- **ソートオプション**:
+  - デフォルト（元の順序）← 現在動作しない
+  - 名前順 (A→Z)
+  - 名前順 (Z→A)
+  - タグ数 (多→少)
 
-  1. https://notebooklm.google.com/ を開く
-  2. F12 → Console
-  3. 以下のログを確認:
-     - "NoteFolder Content Script loaded"
-     - "Injection attempt 1/5"
-     - "Found X project(s)"
-     - "Folder icon injected for project: {uuid}"
-     - "MutationObserver started"
-  4. 各プロジェクトの絵文字(📘)右隣に📁が表示されるか確認
-  5. 📁をクリック → プロジェクトが開かないことを確認
+---
 
-  Console確認コマンド
+## ファイル構成
 
-  // プロジェクト数確認
-  document.querySelectorAll('[id^="project-"][id$="-emoji"]').length
+```
+NoteFolder/
+├── manifest.json              # Content Script設定済み
+├── content/
+│   ├── content.js             # メインロジック（約1100行）
+│   └── content.css            # スタイル（約460行）
+├── popup/
+│   ├── popup.html             # 設定画面（簡略化済み）
+│   ├── popup.css
+│   └── popup.js
+├── icons/
+│   ├── icon16.png
+│   ├── icon48.png
+│   └── icon128.png
+├── 要件定義..md
+├── 実装計画.md                # v4版
+├── アーキテクチャ.md
+├── 参照ルール.md
+└── CLAUDE.md                  # プロジェクト指示書
+```
 
-  // フォルダアイコン数確認
-  document.querySelectorAll('.nf-folder-icon').length
+---
 
-  // ストレージ確認
-  chrome.storage.sync.get(null, console.log)
+## データ構造（chrome.storage.sync）
 
-  次のステップ（Step 3以降）
+```javascript
+{
+  "project:{uuid}": {
+    "id": "uuid",
+    "name": "プロジェクト名",
+    "tags": ["AI", "学習"],
+    "updatedAt": 1703123456789
+  },
+  "allTags": ["AI", "リサーチ", "仕事", "学習"]  // ソート済み
+}
+```
 
-  Step 3: タグ入力ポップオーバー
+---
 
-  実装計画.md §4.3参照:
-  - フォルダアイコンクリックでポップオーバー表示
-  - 現在のタグ一覧（削除可能）
-  - タグ入力欄 + 候補表示
-  - chrome.storage.syncから既存タグ読み込み
+## 重要な実装詳細
 
-  参考コード: 実装計画.md:396-411（UIワイヤーフレーム）
+### content.js の主要関数（行番号は概算）
 
-  Step 4: タグ保存・読込
+| 関数 | 行番号 | 役割 |
+|------|--------|------|
+| `showToast()` | ~51 | トースト通知表示 |
+| `validateTagName()` | ~82 | タグ名バリデーション |
+| `addTagToProject()` | ~117 | タグ追加 |
+| `removeTagFromProject()` | ~188 | タグ削除 |
+| `showTagPopover()` | ~274 | ポップオーバー表示 |
+| `injectFolderIcon()` | ~510 | フォルダアイコン注入 |
+| `filterProjectsByTags()` | ~644 | フィルタリング処理 ← **要修正** |
+| `sortProjects()` | ~718 | ソート処理 ← **要修正** |
+| `showTagDropdown()` | ~790 | タグ選択ドロップダウン |
+| `showSortDropdown()` | ~853 | ソートドロップダウン |
+| `injectFilterUI()` | ~920 | フィルターUI注入 |
+| `initNoteFolder()` | ~980 | 初期化 |
 
-  実装計画.md §4.4参照:
-  - 正しいAPIシグネチャ使用（実装計画.md:505-517）
-  - allTags正規化（実装計画.md:522-527）
-  - エラーハンドリング（実装計画.md:479-497）
+---
 
-  Step 5-8: フィルター・ソート・スタイリング
+## テスト方法
 
-  実装計画.md §4.5-4.6、§5.3参照
+### 拡張機能の更新
 
-  重要なドキュメント
+1. `chrome://extensions`
+2. NoteFolderの「更新」ボタン
+3. NotebookLMページをリロード
 
-  1. 実装計画.md: v4版、全実装詳細
-  2. CLAUDE.md: Context7自動利用ルール、禁止操作
-  3. 要件定義..md: MVPスコープ、成功条件
-  4. 参照ルール.md: 禁止操作の完全リスト
+### 動作確認
 
-  Codex MCPの活用
+1. https://notebooklm.google.com/ を開く
+2. F12 → Console でログを確認
+3. フォルダアイコン(📁)をクリック → ポップオーバー表示
+4. タグを追加/削除
+5. フィルターボタンでタグ選択 → プロジェクトがフィルタリング
+6. ソートボタンでソート選択 → プロジェクトが並び替え
 
-  - エラー分析時にmcp__codex__codexを使用
-  - 現在のコードベースを理解した上で提案を受けられる
+---
 
-  引き継ぎ時の最初のアクション
+## 引き継ぎ時の最初のアクション
 
-  1. ユーザーに現在の状況を確認:
-     「Step 2のテスト結果を教えてください。フォルダアイコンは表示されましたか？」
+1. **このファイルを読んで状況を把握**
 
-  2. テスト完了している場合:
-     「Step 3（タグ入力ポップオーバー実装）に進みますか？」
+2. **次のタスクを確認**:
+   - フィルター/ソート後のレイアウト問題を修正
+   - 修正対象: `filterProjectsByTags()`, `sortProjects()`
+   - 元の順序を記録する仕組みを追加
 
-  3. テスト未完了の場合:
-     テスト手順を案内し、結果に応じてデバッグ
+3. **修正手順**:
+   1. `originalCardOrder`変数を追加
+   2. `initNoteFolder()`で`saveOriginalCardOrder()`を呼び出し
+   3. `filterProjectsByTags()`を修正（表示カードのみappendChild）
+   4. `sortProjects()`を修正（表示カードのみソート・再配置）
+   5. 「デフォルト」ソートで元の順序を復元
 
-  ---
-  最終更新: 2025-12-27
-  実装担当: Claude Sonnet 4.5
-  進捗: Step 2実装完了・テスト待ち（全8ステップ中）
+4. **テスト**:
+   - タグフィルター後、カードが左詰めで表示されるか
+   - ソート後、カードが左詰めで表示されるか
+   - 「デフォルト」で元の順序に戻るか
+
+---
+
+## 将来のタスク（Step 8以降）
+
+- [ ] キーボードナビゲーション（ドロップダウン内でTab/矢印キー移動）
+- [ ] タグ付きプロジェクトのインジケーター表示（フォルダアイコンにドット）
+- [ ] ポップアップ画面での全タグ管理
+- [ ] デバッグログの削除（本番リリース前）
+
+---
+
+**最終更新**: 2025-12-27
+**実装担当**: Claude Opus 4.5
+**進捗**: Step 6完了・レイアウト問題の修正待ち（全8ステップ中）
