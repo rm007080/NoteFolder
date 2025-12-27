@@ -85,6 +85,83 @@ function showToast(message) {
 }
 
 // ========================================
+// キーボードナビゲーション
+// ========================================
+
+/**
+ * ドロップダウンのキーボードナビゲーションをセットアップ
+ * @param {HTMLElement} container - ドロップダウンコンテナ
+ * @param {string} itemSelector - アイテムのCSSセレクタ
+ * @param {function} onSelect - アイテム選択時のコールバック (item) => void
+ * @param {function} onClose - 閉じる時のコールバック
+ * @param {HTMLElement} [focusTarget] - キーイベントを監視する要素（省略時はcontainer）
+ */
+function setupKeyboardNavigation(container, itemSelector, onSelect, onClose, focusTarget = null) {
+  let currentIndex = -1;
+  const eventTarget = focusTarget || container;
+
+  const getItems = () => Array.from(container.querySelectorAll(itemSelector));
+
+  const updateHighlight = (newIndex) => {
+    const items = getItems();
+    if (items.length === 0) return;
+
+    // 前のハイライトを削除
+    items.forEach(item => item.classList.remove('nf-keyboard-focus'));
+
+    // インデックスを範囲内に収める
+    if (newIndex < 0) newIndex = items.length - 1;
+    if (newIndex >= items.length) newIndex = 0;
+
+    currentIndex = newIndex;
+    items[currentIndex].classList.add('nf-keyboard-focus');
+
+    // スクロールして表示
+    items[currentIndex].scrollIntoView({ block: 'nearest' });
+  };
+
+  const handleKeyDown = (e) => {
+    const items = getItems();
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        updateHighlight(currentIndex + 1);
+        break;
+
+      case 'ArrowUp':
+        e.preventDefault();
+        updateHighlight(currentIndex - 1);
+        break;
+
+      case 'Enter':
+        e.preventDefault();
+        if (currentIndex >= 0 && currentIndex < items.length) {
+          onSelect(items[currentIndex]);
+        }
+        break;
+
+      case 'Escape':
+        e.preventDefault();
+        onClose();
+        break;
+
+      case 'Tab':
+        // Tabで閉じる（フォーカスが外れる）
+        onClose();
+        break;
+    }
+  };
+
+  eventTarget.addEventListener('keydown', handleKeyDown);
+
+  // クリーンアップ用に関数を返す
+  return () => {
+    eventTarget.removeEventListener('keydown', handleKeyDown);
+  };
+}
+
+// ========================================
 // バリデーション・ユーティリティ
 // ========================================
 
@@ -424,9 +501,26 @@ function showTagPopover(targetElement, projectId) {
           });
         }
 
+        // 候補のキーボードナビゲーション用インデックス
+        let suggestionIndex = -1;
+
+        // 候補のハイライトを更新
+        const updateSuggestionHighlight = () => {
+          const items = suggestionsList.querySelectorAll('.nf-suggestion-item');
+          items.forEach((item, i) => {
+            if (i === suggestionIndex) {
+              item.classList.add('nf-keyboard-focus');
+              item.scrollIntoView({ block: 'nearest' });
+            } else {
+              item.classList.remove('nf-keyboard-focus');
+            }
+          });
+        };
+
         // 候補更新関数
         const updateSuggestions = (inputValue) => {
           suggestionsList.innerHTML = '';
+          suggestionIndex = -1;  // インデックスをリセット
           console.log('updateSuggestions called:', inputValue, 'allTags:', allTags, 'projectTags:', projectTags);
           if (!inputValue.trim()) return;
 
@@ -439,12 +533,14 @@ function showTagPopover(targetElement, projectId) {
           filtered.forEach(tag => {
             const item = document.createElement('div');
             item.className = 'nf-suggestion-item';
+            item.setAttribute('data-tag', tag);
             item.textContent = tag;
             item.addEventListener('click', async () => {
               const success = await addTagToProject(projectId, tag);
               if (success) {
                 input.value = '';
                 suggestionsList.innerHTML = '';
+                suggestionIndex = -1;
                 updateUI();
                 updateFolderIconState(projectId);
               }
@@ -465,18 +561,59 @@ function showTagPopover(targetElement, projectId) {
           if (success) {
             input.value = '';
             suggestionsList.innerHTML = '';
+            suggestionIndex = -1;
             updateUI();
             updateFolderIconState(projectId);
           }
         };
 
+        // 候補選択処理
+        const selectSuggestion = async () => {
+          const items = suggestionsList.querySelectorAll('.nf-suggestion-item');
+          if (suggestionIndex >= 0 && suggestionIndex < items.length) {
+            const tag = items[suggestionIndex].getAttribute('data-tag');
+            const success = await addTagToProject(projectId, tag);
+            if (success) {
+              input.value = '';
+              suggestionsList.innerHTML = '';
+              suggestionIndex = -1;
+              updateUI();
+              updateFolderIconState(projectId);
+            }
+            return true;
+          }
+          return false;
+        };
+
         addBtn.onclick = handleAddTag;
-        input.onkeydown = (e) => {
-          if (e.key === 'Enter') {
+        input.onkeydown = async (e) => {
+          const items = suggestionsList.querySelectorAll('.nf-suggestion-item');
+          const hasItems = items.length > 0;
+
+          if (e.key === 'ArrowDown' && hasItems) {
             e.preventDefault();
-            handleAddTag();
+            suggestionIndex = suggestionIndex < items.length - 1 ? suggestionIndex + 1 : 0;
+            updateSuggestionHighlight();
+          } else if (e.key === 'ArrowUp' && hasItems) {
+            e.preventDefault();
+            suggestionIndex = suggestionIndex > 0 ? suggestionIndex - 1 : items.length - 1;
+            updateSuggestionHighlight();
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            // 候補が選択されていればそれを選択、そうでなければ入力値を追加
+            const selected = await selectSuggestion();
+            if (!selected) {
+              handleAddTag();
+            }
           } else if (e.key === 'Escape') {
             hideTagPopover();
+          } else if (e.key === 'Tab' && hasItems && suggestionIndex >= 0) {
+            // Tabで候補を入力欄に反映
+            e.preventDefault();
+            const tag = items[suggestionIndex].getAttribute('data-tag');
+            input.value = tag;
+            suggestionsList.innerHTML = '';
+            suggestionIndex = -1;
           }
         };
       }
@@ -866,6 +1003,9 @@ function showSortDropdown(button) {
   sortOptions.forEach(option => {
     const item = document.createElement('div');
     item.className = 'nf-sort-item';
+    item.setAttribute('data-value', option.value);
+    item.setAttribute('data-label', option.label);
+    item.setAttribute('tabindex', '-1');
     if (currentSortType === option.value) {
       item.classList.add('selected');
     }
@@ -890,6 +1030,9 @@ function showSortDropdown(button) {
     dropdown.appendChild(item);
   });
 
+  // ドロップダウンをフォーカス可能に
+  dropdown.setAttribute('tabindex', '-1');
+
   // 位置を計算
   const rect = button.getBoundingClientRect();
   dropdown.style.position = 'fixed';
@@ -897,6 +1040,21 @@ function showSortDropdown(button) {
   dropdown.style.left = `${rect.left}px`;
 
   document.body.appendChild(dropdown);
+
+  // フォーカスをドロップダウンに設定
+  dropdown.focus();
+
+  // キーボードナビゲーションをセットアップ
+  const closeDropdown = () => dropdown.remove();
+  setupKeyboardNavigation(
+    dropdown,
+    '.nf-sort-item',
+    (item) => {
+      // アイテムをクリックしたのと同じ動作
+      item.click();
+    },
+    closeDropdown
+  );
 
   // 外側クリックで閉じる
   const handleClickOutside = (e) => {
@@ -1023,6 +1181,8 @@ function showTagDropdown(button) {
       filteredTags.forEach(tag => {
         const item = document.createElement('div');
         item.className = 'nf-dropdown-item';
+        item.setAttribute('data-tag', tag);
+        item.setAttribute('tabindex', '-1');
         if (selectedFilterTags.includes(tag)) {
           item.classList.add('selected');
         }
@@ -1038,21 +1198,26 @@ function showTagDropdown(button) {
         item.appendChild(label);
 
         item.addEventListener('click', () => {
-          if (selectedFilterTags.includes(tag)) {
-            selectedFilterTags = selectedFilterTags.filter(t => t !== tag);
-            item.classList.remove('selected');
-            checkbox.textContent = '';
-          } else {
-            selectedFilterTags.push(tag);
-            item.classList.add('selected');
-            checkbox.textContent = '✓';
-          }
-          updateFilterUI();
-          filterProjectsByTags(selectedFilterTags);
+          toggleTagSelection(item, tag, checkbox);
         });
 
         tagListContainer.appendChild(item);
       });
+
+      // タグ選択をトグルする関数
+      function toggleTagSelection(item, tag, checkbox) {
+        if (selectedFilterTags.includes(tag)) {
+          selectedFilterTags = selectedFilterTags.filter(t => t !== tag);
+          item.classList.remove('selected');
+          checkbox.textContent = '';
+        } else {
+          selectedFilterTags.push(tag);
+          item.classList.add('selected');
+          checkbox.textContent = '✓';
+        }
+        updateFilterUI();
+        filterProjectsByTags(selectedFilterTags);
+      }
     };
 
     // 初期描画
@@ -1063,12 +1228,18 @@ function showTagDropdown(button) {
       renderTagList(searchInput.value);
     });
 
-    // Escapeキーで閉じる
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        dropdown.remove();
-      }
-    });
+    // キーボードナビゲーションをセットアップ
+    const closeDropdown = () => dropdown.remove();
+    setupKeyboardNavigation(
+      tagListContainer,
+      '.nf-dropdown-item',
+      (item) => {
+        // アイテムをクリックしたのと同じ動作
+        item.click();
+      },
+      closeDropdown,
+      searchInput  // 検索入力欄でキーイベントを監視
+    );
 
     // 位置を計算
     const rect = button.getBoundingClientRect();
@@ -1096,6 +1267,9 @@ function showTagDropdown(button) {
     if (dropdownRect.right > window.innerWidth) {
       dropdown.style.left = `${window.innerWidth - dropdownRect.width - 8}px`;
     }
+
+    // 検索入力欄にフォーカスを設定（キーボードナビゲーションを即座に有効化）
+    searchInput.focus();
 
     // 外側クリックで閉じる
     const handleClickOutside = (e) => {
