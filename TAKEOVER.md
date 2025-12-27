@@ -17,134 +17,74 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 | Step 1 | manifest.json更新（Content Script設定） | ✅ 完了 |
 | Step 2 | フォルダアイコン注入 + クリックイベント | ✅ 完了 |
 | Step 3 | タグ入力ポップオーバー | ✅ 完了 |
-| Step 4 | タグ保存・読込（chrome.storage.sync） | ✅ 完了（Step 3に含む） |
+| Step 4 | タグ保存・読込（chrome.storage.sync） | ✅ 完了 |
 | Step 5 | フィルターUI実装 | ✅ 完了 |
 | Step 5+ | タグ検索機能（ドロップダウン内） | ✅ 完了 |
-| Step 6 | ソート機能実装 | ✅ 基本実装完了 |
-| Step 7 | MutationObserver | ✅ 完了（Step 2に含む） |
-| Step 8 | スタイリング + UX改善 | 🚧 未着手 |
+| Step 6 | ソート機能実装 | ✅ 完了 |
+| Step 7 | MutationObserver | ✅ 完了 |
+| Step 8 | スタイリング + UX改善 | 🚧 一部完了 |
 
 ---
 
-## 🔴 次に対応すべき重要な問題
+## 🔴 直前に実施した修正（要テスト）
 
 ### 問題の概要
 
-フィルター/ソート後のプロジェクトカード表示に問題がある:
+フィルター/ソート後のプロジェクトカード表示に問題があった：
 
-1. **フィルター後の歯抜け状態**: タグでフィルタリングすると、非表示カードの場所が空きスペースとして残り、カードが歯抜け状態になる
-2. **ソート後のレイアウト崩れ**: ソート後にカードが一列に並んでしまう
-3. **デフォルト復元不可**: 「デフォルト」ソートを選択しても元の順序に戻らない
+1. **フィルター後の歯抜け状態**: タグでフィルタリングすると、非表示カードの場所が空きスペースとして残る
+2. **ソートが機能しない**: CSS orderプロパティが効かない
 
-### 問題の原因
+### 原因分析（Phase 1で判明）
 
-現在の実装:
-- フィルタリング: `card.style.display = 'none'` で非表示
-- ソート: `parent.appendChild(card)` でDOM並び替え
+NotebookLMのDOM構造を調査した結果：
 
-NotebookLMのCSS Gridレイアウトでは、`display: none`にしたカードの「位置」が空きスペースとして残る。
-
-### 修正方針
-
-```javascript
-// 修正のポイント:
-// 1. 初期化時に元のカード順序を記録
-// 2. フィルター/ソート時は該当カードをDOMに順番に再配置（appendChild）
-// 3. 非表示カードは display:none ではなく、DOMから一時的に除外するか、
-//    表示カードだけを順番にappendChildして自然に左詰めにする
-// 4. デフォルト選択時は記録した元の順序で再配置
+```
+div.project-buttons-flow  ← グリッドコンテナ（CSS Grid）
+  └── project-button      ← グリッドアイテム（これを操作すべき）
+        └── mat-card.project-button-card  ← 従来操作していた要素
 ```
 
-### 修正すべき関数
+- **mat-grid-tileは存在しない**（Codexの分析は誤りだった）
+- `mat-card`に`display: none`や`order`を設定しても、親の`project-button`がグリッドアイテムなので効果がなかった
 
-1. **`filterProjectsByTags()`** (content.js:644-697)
-   - 現在: `card.style.display = hasMatchingTag ? '' : 'none'`
-   - 修正後: 表示するカードだけを`parent.appendChild(card)`で再配置
+### 実施した修正（Phase 2 & 3）
 
-2. **`sortProjects()`** (content.js:718-783)
-   - 現在: ソート後にappendChildしているが、非表示カードも含めている
-   - 修正後: 表示中のカードだけをソート・再配置
+| 対象 | 変更前 | 変更後 |
+|------|--------|--------|
+| フィルター | `card.style.display = 'none'` | `card.closest('project-button').style.display = 'none'` |
+| ソート | `card.style.order = index` | `card.closest('project-button').style.order = index` |
 
-3. **新規: 元の順序を記録する仕組み**
-   - 初期化時に`originalCardOrder`配列に保存
-   - 「デフォルト」選択時にこの順序で復元
-
-### 参考: 修正イメージ
-
-```javascript
-// グローバル変数として追加
-let originalCardOrder = [];
-
-// 初期化時に元の順序を記録
-function saveOriginalCardOrder() {
-  originalCardOrder = Array.from(getProjectCards());
-}
-
-// フィルター処理の修正版
-function filterProjectsByTags(tags) {
-  const cards = originalCardOrder.length > 0
-    ? originalCardOrder
-    : Array.from(getProjectCards());
-
-  if (cards.length === 0) return;
-  const parent = cards[0].parentElement;
-
-  // 全カードを一度非表示
-  cards.forEach(card => card.style.display = 'none');
-
-  if (tags.length === 0) {
-    // フィルターなし: 元の順序で全表示
-    cards.forEach(card => {
-      card.style.display = '';
-      parent.appendChild(card);
-    });
-    return;
-  }
-
-  // フィルター適用: 該当カードだけを順番に再配置
-  // ... ストレージからタグ情報取得後 ...
-  cards.forEach(card => {
-    const hasMatchingTag = /* タグチェック */;
-    if (hasMatchingTag) {
-      card.style.display = '';
-      parent.appendChild(card);
-    }
-  });
-}
-```
+**修正箇所**:
+- `filterProjectsByTags()` (content.js:674-741)
+- `sortProjects()` (content.js:774-857)
 
 ---
 
-## 実装済み機能の詳細
+## 🟡 次に確認すべきこと
 
-### フォルダアイコン（Step 2）
+### 1. 修正のテスト（未実施）
 
-- **セレクタ**: `[id^="project-"][id$="-emoji"]`
-- **プロジェクトID抽出**: `id.match(/^project-(.+)-emoji$/)[1]`
-- **クリックイベント**: キャプチャフェーズで処理（`{ capture: true }`）
-- **イベント伝播停止**: `stopPropagation()` + `stopImmediatePropagation()`
+以下の動作確認が必要：
 
-### タグ入力ポップオーバー（Step 3）
+| テスト | 期待結果 |
+|--------|----------|
+| タグフィルター | カードがグリッド表示のまま、歯抜けなしで表示 |
+| ソート（名前順 A→Z） | カードの順序が変わる |
+| ソート（デフォルト） | 元の順序に戻る |
+| フィルター解除（クリア） | 全カードが表示される |
 
-- **showTagPopover()**: フォルダアイコンクリックで表示
-- **タグ追加**: `addTagToProject(projectId, tag)`
-- **タグ削除**: `removeTagFromProject(projectId, tag)`
-- **タグ候補**: 入力に応じて前方一致でフィルタリング
-- **XSS対策**: `textContent`使用、`innerHTML`禁止
+### 2. CSS orderがCSS Gridで効くか確認
 
-### フィルターUI（Step 5）
+- CSS Gridで`order`プロパティが効くのは`grid-auto-flow`（自動配置）の場合のみ
+- NotebookLMが明示的にグリッド位置を指定している場合、`order`は効かない
+- 効かない場合は`appendChild`方式に切り替える必要がある
 
-- **配置場所**: `mat-button-toggle-group.project-section-toggle` の直後
-- **タグ選択**: ドロップダウン + 検索機能付き
-- **選択中タグ表示**: バッジ形式、個別削除・一括クリア可能
+### 3. Phase 4: MutationObserver拡張（保留中）
 
-### ソート機能（Step 6）
-
-- **ソートオプション**:
-  - デフォルト（元の順序）← 現在動作しない
-  - 名前順 (A→Z)
-  - 名前順 (Z→A)
-  - タグ数 (多→少)
+NotebookLMのSPAでDOMが再生成された場合、`originalCardOrder`が無効になる可能性がある。必要に応じて：
+- 新しいタイル検知時に`originalCardOrder`を再取得
+- フィルター/ソートの状態を再適用
 
 ---
 
@@ -154,7 +94,7 @@ function filterProjectsByTags(tags) {
 NoteFolder/
 ├── manifest.json              # Content Script設定済み
 ├── content/
-│   ├── content.js             # メインロジック（約1100行）
+│   ├── content.js             # メインロジック（約1200行）
 │   └── content.css            # スタイル（約460行）
 ├── popup/
 │   ├── popup.html             # 設定画面（簡略化済み）
@@ -168,6 +108,7 @@ NoteFolder/
 ├── 実装計画.md                # v4版
 ├── アーキテクチャ.md
 ├── 参照ルール.md
+├── TAKEOVER.md                # この引き継ぎドキュメント
 └── CLAUDE.md                  # プロジェクト指示書
 ```
 
@@ -191,22 +132,47 @@ NoteFolder/
 
 ## 重要な実装詳細
 
-### content.js の主要関数（行番号は概算）
+### content.js の主要関数
 
 | 関数 | 行番号 | 役割 |
 |------|--------|------|
-| `showToast()` | ~51 | トースト通知表示 |
-| `validateTagName()` | ~82 | タグ名バリデーション |
-| `addTagToProject()` | ~117 | タグ追加 |
-| `removeTagFromProject()` | ~188 | タグ削除 |
-| `showTagPopover()` | ~274 | ポップオーバー表示 |
-| `injectFolderIcon()` | ~510 | フォルダアイコン注入 |
-| `filterProjectsByTags()` | ~644 | フィルタリング処理 ← **要修正** |
-| `sortProjects()` | ~718 | ソート処理 ← **要修正** |
-| `showTagDropdown()` | ~790 | タグ選択ドロップダウン |
-| `showSortDropdown()` | ~853 | ソートドロップダウン |
-| `injectFilterUI()` | ~920 | フィルターUI注入 |
-| `initNoteFolder()` | ~980 | 初期化 |
+| `isStorageAvailable()` | ~14 | chrome.storage.sync利用可能チェック |
+| `showToast()` | ~65 | トースト通知表示 |
+| `validateTagName()` | ~96 | タグ名バリデーション |
+| `addTagToProject()` | ~131 | タグ追加 |
+| `removeTagFromProject()` | ~202 | タグ削除 |
+| `showTagPopover()` | ~288 | ポップオーバー表示 |
+| `injectFolderIcon()` | ~534 | フォルダアイコン注入 |
+| `getProjectCards()` | ~654 | プロジェクトカード取得 |
+| `saveOriginalCardOrder()` | ~662 | 元のカード順序保存 |
+| `filterProjectsByTags()` | ~674 | フィルタリング処理 ← **修正済み** |
+| `sortProjects()` | ~774 | ソート処理 ← **修正済み** |
+| `showTagDropdown()` | ~971 | タグ選択ドロップダウン |
+| `showSortDropdown()` | ~869 | ソートドロップダウン |
+| `injectFilterUI()` | ~1102 | フィルターUI注入 |
+| `initNoteFolder()` | ~1193 | 初期化 |
+
+### DOM構造（NotebookLM）
+
+```
+div.project-buttons-flow      ← グリッドコンテナ
+  └── project-button          ← グリッドアイテム（フィルター/ソートはここに適用）
+        └── mat-card.project-button-card
+              └── [id^="project-"][id$="-emoji"]  ← プロジェクトID抽出元
+```
+
+### グリッドアイテム取得パターン
+
+```javascript
+// mat-cardからproject-button要素を取得
+const gridItem = card.closest('project-button') || card;
+
+// display制御
+gridItem.style.display = visible ? '' : 'none';
+
+// order制御
+gridItem.style.order = index;
+```
 
 ---
 
@@ -233,22 +199,26 @@ NoteFolder/
 
 1. **このファイルを読んで状況を把握**
 
-2. **次のタスクを確認**:
-   - フィルター/ソート後のレイアウト問題を修正
-   - 修正対象: `filterProjectsByTags()`, `sortProjects()`
-   - 元の順序を記録する仕組みを追加
+2. **修正のテストを実施**:
+   - 拡張機能を更新してNotebookLMをリロード
+   - フィルター/ソートの動作確認
+   - 歯抜け問題が解消されているか確認
+   - ソートが機能するか確認
 
-3. **修正手順**:
-   1. `originalCardOrder`変数を追加
-   2. `initNoteFolder()`で`saveOriginalCardOrder()`を呼び出し
-   3. `filterProjectsByTags()`を修正（表示カードのみappendChild）
-   4. `sortProjects()`を修正（表示カードのみソート・再配置）
-   5. 「デフォルト」ソートで元の順序を復元
+3. **テスト結果に応じた対応**:
+   - **成功**: Phase 4（MutationObserver拡張）を検討
+   - **orderが効かない場合**: `appendChild`方式に切り替え
+   - **その他の問題**: 原因調査
 
-4. **テスト**:
-   - タグフィルター後、カードが左詰めで表示されるか
-   - ソート後、カードが左詰めで表示されるか
-   - 「デフォルト」で元の順序に戻るか
+4. **ソートがorderで効かない場合の修正方針**:
+   ```javascript
+   // sortProjects内で、orderではなくappendChildを使用
+   const parent = gridItem.parentElement;
+   cardsWithData.forEach((item) => {
+     const gridItem = item.card.closest('project-button') || item.card;
+     parent.appendChild(gridItem);
+   });
+   ```
 
 ---
 
@@ -258,9 +228,26 @@ NoteFolder/
 - [ ] タグ付きプロジェクトのインジケーター表示（フォルダアイコンにドット）
 - [ ] ポップアップ画面での全タグ管理
 - [ ] デバッグログの削除（本番リリース前）
+- [ ] パフォーマンス改善（chrome.storage.syncのキャッシュ化）
+
+---
+
+## 注意事項
+
+### chrome.storage.sync エラー対策
+
+拡張機能のコンテキストが無効になると`chrome.storage.sync`がundefinedになる。対策として`isStorageAvailable()`関数を追加済み。エラーが発生したら：
+1. 拡張機能を一度削除
+2. 再度読み込み
+3. NotebookLMページをリロード
+
+### 禁止操作（CLAUDE.mdより）
+
+- `git push`, `git commit` は実行しない
+- `.env*`, 秘密鍵ファイルは読み書きしない
 
 ---
 
 **最終更新**: 2025-12-27
 **実装担当**: Claude Opus 4.5
-**進捗**: Step 6完了・レイアウト問題の修正待ち（全8ステップ中）
+**進捗**: Phase 1-3完了・テスト待ち

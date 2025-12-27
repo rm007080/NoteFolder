@@ -4,6 +4,20 @@
 console.log('NoteFolder Content Script loaded');
 
 // ========================================
+// Chrome API存在確認
+// ========================================
+
+/**
+ * chrome.storage.syncが利用可能かチェック
+ * @returns {boolean}
+ */
+function isStorageAvailable() {
+  return typeof chrome !== 'undefined' &&
+         chrome.storage &&
+         chrome.storage.sync;
+}
+
+// ========================================
 // 定数
 // ========================================
 
@@ -668,12 +682,19 @@ function filterProjectsByTags(tags) {
   if (cards.length === 0) return;
 
   if (tags.length === 0) {
-    // フィルターなし: 全カード表示
+    // フィルターなし: 全カード表示（project-button要素に適用）
     cards.forEach(card => {
-      card.style.display = '';
+      const gridItem = card.closest('project-button') || card;
+      gridItem.style.display = '';
     });
     // 現在のソート設定を再適用
     sortProjects(currentSortType);
+    return;
+  }
+
+  // ストレージAPIが利用不可の場合は早期リターン
+  if (!isStorageAvailable()) {
+    console.warn('chrome.storage.sync is not available');
     return;
   }
 
@@ -694,24 +715,28 @@ function filterProjectsByTags(tags) {
 
     console.log('Project tags map:', projectTags);
 
-    // 各カードの表示/非表示を制御
+    // 各カードの表示/非表示を制御（project-button要素に適用）
     cards.forEach(card => {
+      // グリッドアイテムであるproject-button要素を取得
+      const gridItem = card.closest('project-button') || card;
+
       const emojiEl = card.querySelector(EMOJI_SELECTOR);
       if (!emojiEl) {
-        card.style.display = '';
+        gridItem.style.display = '';
         return;
       }
 
       const projectId = extractProjectIdFromEmoji(emojiEl);
       if (!projectId) {
-        card.style.display = '';
+        gridItem.style.display = '';
         return;
       }
 
       const cardTags = projectTags[projectId] || [];
       const hasMatchingTag = tags.some(tag => cardTags.includes(tag));
 
-      card.style.display = hasMatchingTag ? '' : 'none';
+      // project-button要素に対してdisplay制御（グリッドの歯抜け防止）
+      gridItem.style.display = hasMatchingTag ? '' : 'none';
     });
 
     // 現在のソート設定を再適用（orderプロパティで順序制御）
@@ -755,8 +780,16 @@ function sortProjects(sortType) {
   if (sortType === 'default') {
     console.log('Default sort - restoring original order');
     allCards.forEach((card, index) => {
-      card.style.order = index;
+      // グリッドアイテムであるproject-button要素にorderを適用
+      const gridItem = card.closest('project-button') || card;
+      gridItem.style.order = index;
     });
+    return;
+  }
+
+  // ストレージAPIが利用不可の場合は早期リターン
+  if (!isStorageAvailable()) {
+    console.warn('chrome.storage.sync is not available');
     return;
   }
 
@@ -798,9 +831,10 @@ function sortProjects(sortType) {
       }
     });
 
-    // CSS orderプロパティで順序を制御（DOMは移動しない）
+    // CSS orderプロパティで順序を制御（project-button要素に適用）
     cardsWithData.forEach((item, index) => {
-      item.card.style.order = index;
+      const gridItem = item.card.closest('project-button') || item.card;
+      gridItem.style.order = index;
     });
 
     console.log('Projects sorted by order property');
@@ -937,6 +971,12 @@ function showTagDropdown(button) {
 
   const dropdown = document.createElement('div');
   dropdown.className = 'nf-tag-dropdown';
+
+  // ストレージAPIが利用不可の場合は早期リターン
+  if (!isStorageAvailable()) {
+    console.warn('chrome.storage.sync is not available');
+    return;
+  }
 
   // ストレージからタグを取得
   chrome.storage.sync.get({ allTags: [] }, (result) => {
