@@ -447,6 +447,68 @@ function removeTagFromProject(projectId, tagToRemove) {
   });
 }
 
+/**
+ * allTagsからタグを完全削除（全プロジェクトからも削除）
+ * @param {string} tagToRemove - 削除するタグ
+ * @returns {Promise<boolean>}
+ */
+function removeTagFromAllProjects(tagToRemove) {
+  return new Promise((resolve) => {
+    // キャッシュから現在のデータを取得
+    const cachedAllTags = getCachedAllTags();
+
+    // タグが存在しない場合
+    if (!cachedAllTags.includes(tagToRemove)) {
+      showToast('タグが見つかりません');
+      resolve(false);
+      return;
+    }
+
+    // allTagsから削除
+    const newAllTags = cachedAllTags.filter(tag => tag !== tagToRemove);
+
+    // 全プロジェクトからこのタグを削除
+    const updatedProjects = {};
+
+    for (const [projectId, projectData] of cache.projects) {
+      if (projectData.tags && projectData.tags.includes(tagToRemove)) {
+        const updatedProject = {
+          ...projectData,
+          tags: projectData.tags.filter(tag => tag !== tagToRemove),
+          updatedAt: Date.now()
+        };
+        updatedProjects[`project:${projectId}`] = updatedProject;
+      }
+    }
+
+    // 更新データを作成
+    const updateData = {
+      allTags: newAllTags,
+      ...updatedProjects
+    };
+
+    // 保存
+    chrome.storage.sync.set(updateData, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage write error:', chrome.runtime.lastError.message);
+        showToast('タグの削除に失敗しました');
+        resolve(false);
+        return;
+      }
+
+      // キャッシュを更新
+      cache.allTags = newAllTags;
+      for (const [key, value] of Object.entries(updatedProjects)) {
+        const projectId = key.replace('project:', '');
+        cache.projects.set(projectId, value);
+      }
+
+      showToast(`タグ「${tagToRemove}」を削除しました`);
+      resolve(true);
+    });
+  });
+}
+
 // ========================================
 // ポップオーバー
 // ========================================
@@ -787,9 +849,17 @@ function injectFolderIcon(emojiElement) {
     return;
   }
 
-  // すでに処理済みならスキップ
+  // すでに処理済みの場合、DOMに実際にアイコンが存在するか確認
   if (processedProjects.has(projectId)) {
-    return;
+    // DOMに実際にフォルダアイコンが存在するか確認
+    const existingIcon = document.querySelector(
+      `.nf-folder-icon[data-project-id="${projectId}"]`
+    );
+    if (existingIcon) {
+      return; // 実際に存在する場合のみスキップ
+    }
+    // DOMに存在しない場合は再注入するためSetから削除
+    processedProjects.delete(projectId);
   }
 
   // すでにフォルダアイコンが注入済みならスキップ
@@ -1247,13 +1317,46 @@ function showTagDropdown(button) {
       checkbox.textContent = selectedFilterTags.includes(tag) ? '✓' : '';
 
       const label = document.createElement('span');
+      label.className = 'nf-dropdown-item-label';
       label.textContent = tag;
+
+      // 削除ボタン
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'nf-tag-delete-btn';
+      deleteBtn.textContent = '×';
+      deleteBtn.setAttribute('title', 'タグを削除');
+      deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        // 確認ダイアログ
+        const confirmed = confirm(
+          `タグ「${tag}」を削除しますか？\n\nこのタグを使用している全てのプロジェクトからも削除されます。`
+        );
+        if (confirmed) {
+          const success = await removeTagFromAllProjects(tag);
+          if (success) {
+            // 選択中のフィルターからも削除
+            selectedFilterTags = selectedFilterTags.filter(t => t !== tag);
+            updateFilterUI();
+            filterProjectsByTags(selectedFilterTags);
+            // ドロップダウンを再描画
+            renderTagList(searchInput.value);
+            // フォルダアイコンの状態を更新
+            for (const [projectId] of cache.projects) {
+              updateFolderIconState(projectId);
+            }
+          }
+        }
+      });
 
       item.appendChild(checkbox);
       item.appendChild(label);
+      item.appendChild(deleteBtn);
 
-      item.addEventListener('click', () => {
-        toggleTagSelection(item, tag, checkbox);
+      item.addEventListener('click', (e) => {
+        // 削除ボタン以外をクリックした場合のみ選択トグル
+        if (!e.target.classList.contains('nf-tag-delete-btn')) {
+          toggleTagSelection(item, tag, checkbox);
+        }
       });
 
       tagListContainer.appendChild(item);
@@ -1440,6 +1543,40 @@ function observeProjectList() {
   return observer;
 }
 
+/**
+ * セクション切り替えボタン（全て/マイノートブック等）の監視をセットアップ
+ * 画面切り替え時にフォルダアイコンを再注入する
+ */
+function setupSectionToggleListener() {
+  // mat-button-toggle-groupを監視
+  const toggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
+  if (!toggleGroup) {
+    // 見つからない場合は遅延して再試行
+    setTimeout(setupSectionToggleListener, 1000);
+    return;
+  }
+
+  // クリックイベントを監視（キャプチャフェーズで）
+  toggleGroup.addEventListener('click', () => {
+    // 少し遅延してからフォルダアイコンを再注入（DOMの更新を待つ）
+    setTimeout(() => {
+      injectAllFolderIcons();
+      // フォルダアイコンの状態を更新
+      for (const [projectId] of cache.projects) {
+        updateFolderIconState(projectId);
+      }
+    }, 300);
+
+    // さらに遅延して再度チェック（SPAの遅延読み込み対応）
+    setTimeout(() => {
+      injectAllFolderIcons();
+      for (const [projectId] of cache.projects) {
+        updateFolderIconState(projectId);
+      }
+    }, 800);
+  }, { capture: true });
+}
+
 // ========================================
 // 初期化
 // ========================================
@@ -1476,6 +1613,9 @@ function initNoteFolder() {
 
     // MutationObserverで動的に追加されるプロジェクトを監視
     observeProjectList();
+
+    // セクション切り替えボタンの監視をセットアップ
+    setupSectionToggleListener();
   });
 }
 
