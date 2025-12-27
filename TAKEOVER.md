@@ -23,43 +23,67 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 | Step 6 | ソート機能実装 | ✅ 完了 |
 | Step 7 | MutationObserver | ✅ 完了 |
 | Step 8 | スタイリング + UX改善 | ✅ 完了 |
+| Step 9 | デバッグログ削除 | ✅ 完了 |
+| Step 10 | キャッシュ化（パフォーマンス改善） | ✅ 完了 |
 
 ---
 
 ## ✅ 直前に完了した機能（2025-12-28）
 
-### キーボードナビゲーション機能
+### 1. デバッグログ削除
 
-すべてのドロップダウン/ポップオーバーにキーボード操作を追加しました。
+`console.log`と`console.warn`をすべて削除。`console.error`のみ残存（エラーハンドリング用）。
 
-#### 実装した機能
+| ファイル | 削除数 | 残存（error） |
+|----------|--------|---------------|
+| content/content.js | 27箇所 | 6箇所 |
+| popup/popup.js | 2箇所 | 1箇所 |
 
-| 対象 | キー操作 |
-|------|----------|
-| **タグ選択ドロップダウン** | ↑↓: アイテム移動、Enter: 選択、Esc: 閉じる、Tab: ソートボタンへ、Shift+Tab: フィルターボタンへ |
-| **ソートドロップダウン** | ↑↓: アイテム移動、Enter: 選択、Esc: 閉じる、Shift+Tab: フィルターボタンへ |
-| **タグ入力ポップオーバー** | ↑↓: 候補移動、Enter: 候補選択/タグ追加、Tab: 候補を入力欄に反映、Esc: 閉じる |
+### 2. chrome.storage.syncのキャッシュ化
 
-#### 変更ファイル
+ストレージアクセスを大幅削減し、UI表示速度を向上。
 
-| ファイル | 変更内容 |
-|---------|----------|
-| `content/content.js` | `setupKeyboardNavigation`ヘルパー関数追加、各ドロップダウンへの適用 |
-| `content/content.css` | `.nf-keyboard-focus`ハイライトスタイル追加 |
+#### キャッシュ構造
 
-#### 主な変更点
+```javascript
+const cache = {
+  allTags: [],
+  projects: new Map(),  // projectId -> projectData
+  initialized: false
+};
+let cacheReadyPromise = null;
+```
 
-1. **`setupKeyboardNavigation`関数** (content.js:91-167)
-   - 共通のキーボードナビゲーションロジック
-   - `onTab`コールバックでTab/Shift+Tab時の動作をカスタマイズ可能
+#### 新規追加関数（content.js:28-169）
 
-2. **ボタンの識別用属性** (content.js:1313, 1323)
-   - `data-nf-button="filter"` / `data-nf-button="sort"`
-   - Tab移動先の特定に使用
+| 関数 | 内容 |
+|------|------|
+| `initCache()` | 初期化時に全データをキャッシュに読み込み |
+| `ensureCacheReady()` | キャッシュ初期化完了を待機 |
+| `getCachedAllTags()` | allTagsをキャッシュから取得 |
+| `getCachedProject(projectId)` | 個別プロジェクトをキャッシュから取得 |
+| `getCachedAllProjectTags()` | 全プロジェクトのタグマップを取得 |
+| `updateCache(projectId, projectData, newAllTags)` | 書き込み成功後にキャッシュを更新 |
+| `setupStorageListener()` | 他タブからの変更を検知して同期 |
 
-3. **フィルタードロップダウンの自動フォーカス** (content.js:1281)
-   - ドロップダウン表示時に検索入力欄へ自動フォーカス
-   - クリック直後から矢印キーで操作可能
+#### 変更された関数
+
+| 関数 | 変更内容 |
+|------|---------|
+| `addTagToProject()` | キャッシュから読み込み、SET成功後に更新 |
+| `removeTagFromProject()` | キャッシュから読み込み、SET成功後に更新 |
+| `showTagPopover()` | updateUI()がキャッシュからUI構築（非同期削除） |
+| `filterProjectsByTags()` | getCachedAllProjectTags()でタグマップ取得 |
+| `sortProjects()` | getCachedAllProjectTags()でタグマップ取得 |
+| `showTagDropdown()` | getCachedAllTags()でタグ取得（非同期削除） |
+| `updateFolderIconState()` | getCachedProject()で同期取得 |
+| `initNoteFolder()` | initCache().then()でキャッシュ初期化後にUI注入 |
+
+#### 効果
+
+- ストレージ読み込み: 初期化時の1回のみ
+- UI表示: 即時（非同期待ち不要）
+- 他タブ同期: `chrome.storage.onChanged`で自動更新
 
 ---
 
@@ -69,7 +93,7 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 NoteFolder/
 ├── manifest.json              # Content Script設定済み
 ├── content/
-│   ├── content.js             # メインロジック（約1400行）
+│   ├── content.js             # メインロジック（約1490行）
 │   └── content.css            # スタイル（約480行）
 ├── popup/
 │   ├── popup.html             # 設定画面（簡略化済み）
@@ -107,26 +131,26 @@ NoteFolder/
 
 ## 重要な実装詳細
 
-### content.js の主要関数
+### content.js の主要関数（行番号は目安）
 
 | 関数 | 行番号 | 役割 |
 |------|--------|------|
-| `setupKeyboardNavigation()` | ~91 | キーボードナビゲーション共通ロジック |
-| `isStorageAvailable()` | ~14 | chrome.storage.sync利用可能チェック |
-| `showToast()` | ~65 | トースト通知表示 |
-| `validateTagName()` | ~172 | タグ名バリデーション |
-| `addTagToProject()` | ~207 | タグ追加 |
-| `removeTagFromProject()` | ~278 | タグ削除 |
-| `showTagPopover()` | ~364 | ポップオーバー表示（候補ナビゲーション対応） |
-| `injectFolderIcon()` | ~610 | フォルダアイコン注入 |
-| `getProjectCards()` | ~730 | プロジェクトカード取得 |
-| `saveOriginalCardOrder()` | ~738 | 元のカード順序保存 |
-| `filterProjectsByTags()` | ~750 | フィルタリング処理 |
-| `sortProjects()` | ~850 | ソート処理 |
-| `showSortDropdown()` | ~990 | ソートドロップダウン（キーボード対応） |
-| `showTagDropdown()` | ~1120 | タグ選択ドロップダウン（キーボード対応） |
-| `injectFilterUI()` | ~1300 | フィルターUI注入 |
-| `initNoteFolder()` | ~1380 | 初期化 |
+| `initCache()` | ~47 | キャッシュ初期化（全データ読み込み） |
+| `ensureCacheReady()` | ~92 | キャッシュ初期化待機 |
+| `getCachedAllTags()` | ~106 | キャッシュからallTags取得 |
+| `getCachedProject()` | ~115 | キャッシュから個別プロジェクト取得 |
+| `getCachedAllProjectTags()` | ~123 | 全プロジェクトのタグマップ取得 |
+| `updateCache()` | ~137 | キャッシュ更新 |
+| `setupStorageListener()` | ~149 | onChangedリスナー登録 |
+| `setupKeyboardNavigation()` | ~234 | キーボードナビゲーション共通ロジック |
+| `addTagToProject()` | ~354 | タグ追加（キャッシュ対応） |
+| `removeTagFromProject()` | ~418 | タグ削除（キャッシュ対応） |
+| `showTagPopover()` | ~495 | ポップオーバー表示 |
+| `updateFolderIconState()` | ~760 | フォルダアイコン状態更新 |
+| `filterProjectsByTags()` | ~922 | フィルタリング処理 |
+| `sortProjects()` | ~991 | ソート処理 |
+| `showTagDropdown()` | ~1189 | タグ選択ドロップダウン |
+| `initNoteFolder()` | ~1450 | 初期化（キャッシュ初期化後にUI注入） |
 
 ### DOM構造（NotebookLM）
 
@@ -163,20 +187,17 @@ gridItem.style.order = index;
 ### 動作確認
 
 1. https://notebooklm.google.com/ を開く
-2. F12 → Console でログを確認
+2. F12 → Console でエラーがないことを確認
 3. フォルダアイコン(📁)をクリック → ポップオーバー表示
 4. タグを追加/削除
 5. フィルターボタンでタグ選択 → プロジェクトがフィルタリング
 6. ソートボタンでソート選択 → プロジェクトが並び替え
 
-### キーボードナビゲーションのテスト
+### キャッシュ動作確認
 
-| テスト | 操作 | 期待結果 |
-|--------|------|----------|
-| フィルタードロップダウン | クリック → ↓キー | タグがハイライト |
-| Tab移動 | フィルタードロップダウン → Tab | ソートボタンにフォーカス |
-| Shift+Tab移動 | ソートドロップダウン → Shift+Tab | フィルターボタンにフォーカス |
-| タグ候補選択 | ポップオーバー入力 → ↓キー → Enter | 候補がタグとして追加 |
+1. 初回読み込み時にキャッシュが初期化されること
+2. タグ追加/削除後にUIが即座に更新されること
+3. 別タブでタグを変更した場合に同期されること
 
 ---
 
@@ -184,7 +205,7 @@ gridItem.style.order = index;
 
 ### リリース前（必須）
 - [x] デバッグログ削除（console.log等の除去） ✅ 2025-12-28完了
-- [ ] パフォーマンス改善（chrome.storage.syncのキャッシュ化）
+- [x] パフォーマンス改善（chrome.storage.syncのキャッシュ化） ✅ 2025-12-28完了
 
 ### 追加機能（オプション）
 - [ ] ポップアップ画面での全タグ管理
@@ -202,6 +223,12 @@ gridItem.style.order = index;
 2. 再度読み込み
 3. NotebookLMページをリロード
 
+### キャッシュの注意点
+
+- キャッシュは`initNoteFolder()`で`initCache()`を呼び出して初期化
+- 書き込み成功後のみ`updateCache()`でキャッシュを更新（失敗時は更新しない）
+- 他タブからの変更は`chrome.storage.onChanged`で検知してキャッシュを自動更新
+
 ### 禁止操作（CLAUDE.mdより）
 
 - `git push`, `git commit` は実行しない
@@ -211,4 +238,4 @@ gridItem.style.order = index;
 
 **最終更新**: 2025-12-28
 **実装担当**: Claude Opus 4.5
-**進捗**: Step 8完了（キーボードナビゲーション実装済み）
+**進捗**: リリース前必須タスク完了（デバッグログ削除 + キャッシュ化）
