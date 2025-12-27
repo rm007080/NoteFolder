@@ -2,7 +2,6 @@
 // 設定画面: 全タグ一覧表示など将来拡張用
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('NoteFolder popup loaded');
 
   // プロジェクト情報エリアにメッセージ表示
   const projectIdElement = document.getElementById('project-id');
@@ -42,7 +41,6 @@ function displayAllTags() {
     }
 
     const allTags = result.allTags || [];
-    console.log('All tags:', allTags);
 
     // 将来的にここでタグ一覧UIを表示
     // 現在は開発情報として表示

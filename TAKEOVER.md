@@ -183,7 +183,7 @@ gridItem.style.order = index;
 ## 将来のタスク
 
 ### リリース前（必須）
-- [ ] デバッグログ削除（console.log等の除去）
+- [x] デバッグログ削除（console.log等の除去） ✅ 2025-12-28完了
 - [ ] パフォーマンス改善（chrome.storage.syncのキャッシュ化）
 
 ### 追加機能（オプション）

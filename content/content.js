@@ -1,8 +1,6 @@
 // NoteFolder - Content Script
 // Step 2: フォルダアイコン注入（動的対応版）
 
-console.log('NoteFolder Content Script loaded');
-
 // ========================================
 // Chrome API存在確認
 // ========================================
@@ -266,7 +264,6 @@ function addTagToProject(projectId, newTag) {
               resolve(false);
               return;
             }
-            console.log('Tag added:', normalizedTag, 'to project:', projectId);
             resolve(true);
           }
         );
@@ -313,7 +310,6 @@ function removeTagFromProject(projectId, tagToRemove) {
               resolve(false);
               return;
             }
-            console.log('Tag removed:', tagToRemove, 'from project:', projectId);
             resolve(true);
           }
         );
@@ -526,14 +522,12 @@ function showTagPopover(targetElement, projectId) {
         const updateSuggestions = (inputValue) => {
           suggestionsList.innerHTML = '';
           suggestionIndex = -1;  // インデックスをリセット
-          console.log('updateSuggestions called:', inputValue, 'allTags:', allTags, 'projectTags:', projectTags);
           if (!inputValue.trim()) return;
 
           const filtered = allTags.filter(tag =>
             tag.toLowerCase().startsWith(inputValue.toLowerCase()) &&
             !projectTags.includes(tag)
           ).slice(0, 5);
-          console.log('Filtered suggestions:', filtered);
 
           filtered.forEach(tag => {
             const item = document.createElement('div');
@@ -677,7 +671,6 @@ function injectFolderIcon(emojiElement) {
   // プロジェクトIDを抽出
   const projectId = extractProjectIdFromEmoji(emojiElement);
   if (!projectId) {
-    console.warn('Project ID not found for emoji element:', emojiElement);
     return;
   }
 
@@ -689,7 +682,6 @@ function injectFolderIcon(emojiElement) {
   // すでにフォルダアイコンが注入済みならスキップ
   const parentElement = emojiElement.parentElement;
   if (!parentElement) {
-    console.warn('Parent element not found for project:', projectId);
     return;
   }
 
@@ -713,7 +705,6 @@ function injectFolderIcon(emojiElement) {
     parentElement.appendChild(folderIcon);
   }
 
-  console.log('Folder icon injected for project:', projectId);
   processedProjects.add(projectId);
 
   // クリックイベント（キャプチャフェーズで処理して確実にイベントを捕捉）
@@ -721,7 +712,6 @@ function injectFolderIcon(emojiElement) {
     e.stopPropagation();
     e.stopImmediatePropagation();
     e.preventDefault();
-    console.log('Folder icon clicked for project:', projectId);
     showTagPopover(folderIcon, projectId);
   };
 
@@ -743,7 +733,6 @@ function injectFolderIcon(emojiElement) {
 function injectAllFolderIcons() {
   // プロジェクトの絵文字アイコンを持つ要素を全て検索
   const emojiElements = document.querySelectorAll(EMOJI_SELECTOR);
-  console.log(`Found ${emojiElements.length} project(s)`);
 
   emojiElements.forEach((emojiElement) => {
     injectFolderIcon(emojiElement);
@@ -774,7 +763,6 @@ function findFilterTargetElement() {
   // mat-button-toggle-group（タブバー）を検索
   const toggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
   if (toggleGroup) {
-    console.log('Found toggle group for filter UI placement');
     return toggleGroup;
   }
 
@@ -805,7 +793,6 @@ function saveOriginalCardOrder() {
   const cards = Array.from(getProjectCards());
   if (cards.length > 0 && originalCardOrder.length === 0) {
     originalCardOrder = cards;
-    console.log('Original card order saved:', originalCardOrder.length, 'cards');
   }
 }
 
@@ -814,7 +801,6 @@ function saveOriginalCardOrder() {
  * @param {string[]} tags - フィルターするタグ（空配列なら全表示）
  */
 function filterProjectsByTags(tags) {
-  console.log('Filtering by tags:', tags);
 
   // 元の順序を使用（未保存なら現在のカードを使用）
   const cards = originalCardOrder.length > 0
@@ -836,7 +822,6 @@ function filterProjectsByTags(tags) {
 
   // ストレージAPIが利用不可の場合は早期リターン
   if (!isStorageAvailable()) {
-    console.warn('chrome.storage.sync is not available');
     return;
   }
 
@@ -854,8 +839,6 @@ function filterProjectsByTags(tags) {
         projectTags[value.id] = value.tags || [];
       }
     }
-
-    console.log('Project tags map:', projectTags);
 
     // 各カードの表示/非表示を制御（project-button要素に適用）
     cards.forEach(card => {
@@ -883,8 +866,6 @@ function filterProjectsByTags(tags) {
 
     // 現在のソート設定を再適用（orderプロパティで順序制御）
     sortProjects(currentSortType);
-
-    console.log('Filtered by tags');
   });
 }
 
@@ -908,7 +889,6 @@ function getProjectName(card) {
  * @param {string} sortType - ソートタイプ ('default', 'name-asc', 'name-desc', 'tags-desc')
  */
 function sortProjects(sortType) {
-  console.log('Sorting projects by:', sortType);
   currentSortType = sortType;
 
   // 元の順序を基準にする
@@ -920,7 +900,6 @@ function sortProjects(sortType) {
 
   // デフォルト順の場合は元の順序（orderをリセット）
   if (sortType === 'default') {
-    console.log('Default sort - restoring original order');
     allCards.forEach((card, index) => {
       // グリッドアイテムであるproject-button要素にorderを適用
       const gridItem = card.closest('project-button') || card;
@@ -931,7 +910,6 @@ function sortProjects(sortType) {
 
   // ストレージAPIが利用不可の場合は早期リターン
   if (!isStorageAvailable()) {
-    console.warn('chrome.storage.sync is not available');
     return;
   }
 
@@ -978,8 +956,6 @@ function sortProjects(sortType) {
       const gridItem = item.card.closest('project-button') || item.card;
       gridItem.style.order = index;
     });
-
-    console.log('Projects sorted by order property');
   });
 }
 
@@ -1147,7 +1123,6 @@ function showTagDropdown(button) {
 
   // ストレージAPIが利用不可の場合は早期リターン
   if (!isStorageAvailable()) {
-    console.warn('chrome.storage.sync is not available');
     return;
   }
 
@@ -1316,11 +1291,8 @@ function injectFilterUI() {
 
   const targetElement = findFilterTargetElement();
   if (!targetElement) {
-    console.log('Filter target element not found');
     return;
   }
-
-  console.log('Injecting filter UI near:', targetElement);
 
   // フィルターUIコンテナ（コンパクト版）
   const filterContainer = document.createElement('div');
@@ -1363,7 +1335,6 @@ function injectFilterUI() {
   }
 
   filterUIInjected = true;
-  console.log('Filter UI injected');
 }
 
 // ========================================
@@ -1381,7 +1352,6 @@ function observeProjectList() {
 
         // 追加されたノード自体が絵文字アイコンの場合
         if (node.id && node.id.match(/^project-.+-emoji$/)) {
-          console.log('New project detected (direct):', node.id);
           injectFolderIcon(node);
         }
 
@@ -1389,7 +1359,6 @@ function observeProjectList() {
         if (node.querySelectorAll) {
           const emojiElements = node.querySelectorAll(EMOJI_SELECTOR);
           if (emojiElements.length > 0) {
-            console.log(`New project(s) detected (descendants): ${emojiElements.length}`);
             emojiElements.forEach((emojiElement) => {
               injectFolderIcon(emojiElement);
             });
@@ -1404,7 +1373,6 @@ function observeProjectList() {
     subtree: true
   });
 
-  console.log('MutationObserver started');
   return observer;
 }
 
@@ -1416,18 +1384,13 @@ function observeProjectList() {
  * NoteFolder初期化
  */
 function initNoteFolder() {
-  console.log('NoteFolder initializing...');
-  console.log('Current URL:', window.location.href);
-
   // NotebookLMのプロジェクト一覧ページかチェック
   if (!window.location.href.includes('notebooklm.google.com')) {
-    console.log('Not on NotebookLM page, skipping initialization');
     return;
   }
 
   // 既存のプロジェクトにアイコンを注入（複数回試行）
   const tryInject = (attempt = 1, maxAttempts = 5) => {
-    console.log(`Injection attempt ${attempt}/${maxAttempts}`);
     injectAllFolderIcons();
     injectFilterUI();
     // 元のカード順序を保存（初回のみ）
