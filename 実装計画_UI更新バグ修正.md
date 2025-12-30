@@ -1,36 +1,19 @@
-# NoteFolder開発 - 詳細な引き継ぎプロンプト
+# NoteFolder UI更新バグ修正 実装計画
 
-## プロジェクト概要
-
-NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡張機能（Manifest V3）を開発中。外部サーバー不要、chrome.storage.syncでデータ管理。
-
-**プロジェクトパス**: `/mnt/c/Users/littl/app-dev/06_NoteFolder/NoteFolder`
+## 修正対象ファイル
+- `/mnt/c/Users/littl/app-dev/06_NoteFolder/NoteFolder/content/content.js`
 
 ---
 
-## 現在の状況
-
-### ステータス: バグ修正実装待ち
-
-全機能実装完了後、以下の3つのバグが報告され、実装計画が承認済み。
-
----
-
-## 修正対象バグ（3件）
+## 修正対象バグ
 
 ### バグ1&2: タグ操作後のUI即時更新問題
-**現象**:
-- ドラッグ&ドロップでタグを親タグに移動
-- ×ボタンでタグ削除
-- 「ルートに移動」で子タグ解除
-- タグカラー変更
-
-これらの操作後、**ブラウザ更新なしでは見た目が変わらない**
+**現象**: ドラッグ&ドロップ、削除、カラー変更後、ブラウザ更新なしでは見た目が変わらない
 
 **原因**: `onColorChange` コールバック（行1492）が `updateUI()` のみ呼び出し。インラインバッジ（プロジェクトカード上）が更新されない。
 
 ### バグ3: SPAナビゲーション後のUI消失
-**現象**: プロジェクトを開いて戻るボタンで戻ると、フィルターUI（検索、タグ、ソート）が消える
+**現象**: プロジェクトを開いて戻ると、フィルターUI（検索、タグ、ソート）が消える
 
 **原因**:
 - `filterUIInjected` フラグがリセットされない
@@ -39,14 +22,18 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 
 ---
 
-## 承認済み実装計画
-
-**計画ファイル**: `実装計画_UI更新バグ修正.md`
+## 実装手順
 
 ### Phase 1: ユーティリティ関数追加
 
-#### 1-1. `updateAllInlineBadges()` 追加（行1715の後）
+#### 1-1. `updateAllInlineBadges()` 関数追加
+**挿入位置**: 行1715の後（`updateInlineBadges` 関数の後）
+
 ```javascript
+/**
+ * 表示中の全プロジェクトのインラインバッジを更新
+ * パフォーマンス: cache.projects全体ではなく、DOM上に存在するもののみ対象
+ */
 function updateAllInlineBadges() {
   const visibleIcons = document.querySelectorAll('.nf-folder-icon[data-project-id]');
   visibleIcons.forEach(icon => {
@@ -58,8 +45,13 @@ function updateAllInlineBadges() {
 }
 ```
 
-#### 1-2. `resetUIState()` 追加（行1918の後）
+#### 1-2. `resetUIState()` 関数追加
+**挿入位置**: 行1918の後（`saveOriginalCardOrder` 関数の後）
+
 ```javascript
+/**
+ * ナビゲーション時にUI状態をリセット
+ */
 function resetUIState() {
   originalCardOrder = [];
   filterUIInjected = false;
@@ -69,17 +61,42 @@ function resetUIState() {
 }
 ```
 
-### Phase 2: カラー変更時のUI更新修正（行1492）
+---
+
+### Phase 2: カラー変更時のUI更新修正
+
+#### 2-1. `onColorChange` コールバック修正
+**修正位置**: 行1492
+
+**修正前**:
 ```javascript
-// 修正前: onColorChange: () => updateUI()
-// 修正後:
+onColorChange: () => updateUI()
+```
+
+**修正後**:
+```javascript
 onColorChange: () => {
   updateUI();
   updateAllInlineBadges();
 }
 ```
 
-### Phase 3: フィルターUI注入関数の強化（行2752-2758）
+---
+
+### Phase 3: フィルターUI注入関数の強化
+
+#### 3-1. `injectFilterUI()` にDOM存在確認追加
+**修正位置**: 行2752-2758
+
+**修正前**:
+```javascript
+function injectFilterUI() {
+  if (filterUIInjected) return;
+
+  const targetElement = findFilterTargetElement();
+```
+
+**修正後**:
 ```javascript
 function injectFilterUI() {
   const existingFilterUI = document.querySelector('.nf-filter-container');
@@ -87,15 +104,21 @@ function injectFilterUI() {
   if (!existingFilterUI) {
     filterUIInjected = false;
   }
+
   const targetElement = findFilterTargetElement();
-  // ...
-}
 ```
 
-### Phase 4: SPAナビゲーション監視機能追加（行2906の後）
+---
 
-#### 4-1. `isProjectListPage()` 追加
+### Phase 4: SPAナビゲーション監視機能追加
+
+#### 4-1. `isProjectListPage()` 関数追加
+**挿入位置**: 行2906の後（`setupSectionToggleListener` 関数の後）
+
 ```javascript
+/**
+ * 現在のページがプロジェクト一覧ページかどうかを判定
+ */
 function isProjectListPage() {
   const url = window.location.href;
   return url.includes('notebooklm.google.com') &&
@@ -104,9 +127,15 @@ function isProjectListPage() {
 }
 ```
 
-#### 4-2. `setupSPANavigationListener()` 追加
+#### 4-2. `setupSPANavigationListener()` 関数追加
+**挿入位置**: `isProjectListPage()` の後
+
 ```javascript
+/**
+ * SPAナビゲーションを監視
+ */
 function setupSPANavigationListener() {
+  // history.pushState/replaceStateをフック
   const originalPushState = history.pushState;
   const originalReplaceState = history.replaceState;
 
@@ -120,34 +149,47 @@ function setupSPANavigationListener() {
     handleNavigationChange();
   };
 
+  // popstateイベント（ブラウザの戻る/進む）
   window.addEventListener('popstate', handleNavigationChange);
 
   function handleNavigationChange() {
+    // リトライロジック（最大5回、300ms間隔）
     const tryReinject = (attempt = 1, maxAttempts = 5) => {
+      // 一覧ページでない場合は終了
       if (!isProjectListPage()) return;
 
       const existingFilterUI = document.querySelector('.nf-filter-container');
       const targetElement = findFilterTargetElement();
 
       if (!existingFilterUI && targetElement) {
+        // ターゲット要素が存在 → UI注入実行
         resetUIState();
         injectAllFolderIcons();
         injectFilterUI();
         saveOriginalCardOrder();
-        setupSectionToggleListener();
+        setupSectionToggleListener(); // セクションタブリスナーも再設定
         for (const [projectId] of cache.projects) {
           updateFolderIconState(projectId);
         }
       } else if (!existingFilterUI && !targetElement && attempt < maxAttempts) {
+        // ターゲット要素がまだない → リトライ
         setTimeout(() => tryReinject(attempt + 1, maxAttempts), 300);
       }
     };
+
+    // 初回は300ms後に開始
     setTimeout(() => tryReinject(), 300);
   }
 }
 ```
 
-### Phase 5: 初期化関数での呼び出し追加（行2946の後）
+---
+
+### Phase 5: 初期化関数での呼び出し追加
+
+#### 5-1. `initNoteFolder()` で `setupSPANavigationListener()` 呼び出し追加
+**修正位置**: 行2946の後（`setupSectionToggleListener()` の後）
+
 ```javascript
 setupSPANavigationListener();
 ```
@@ -168,43 +210,14 @@ setupSPANavigationListener();
 
 ---
 
-## ファイル構成
+## Codexレビュー指摘事項への対応
 
-```
-NoteFolder/
-├── manifest.json              # Content Script設定済み
-├── content/
-│   ├── content.js             # メインロジック（約2800行）★修正対象
-│   └── content.css            # スタイル（約860行）
-├── popup/
-│   ├── popup.html
-│   ├── popup.css
-│   └── popup.js
-├── icons/
-├── 実装計画_UI更新バグ修正.md  # 承認済み実装計画（詳細）
-├── TAKEOVER.md                # この引き継ぎドキュメント
-└── CLAUDE.md                  # プロジェクト指示書
-```
-
----
-
-## 次のアクション
-
-1. **`content/content.js` を読み込む**
-2. **Phase 1から順に実装を開始**
-3. **各Phase完了後、動作確認**
-
----
-
-## 注意事項
-
-### 禁止操作（CLAUDE.mdより）
-- `git push`, `git commit` は実行しない
-- `.env*`, 秘密鍵ファイルは読み書きしない
-
-### 実装上の注意
-- **XSS対策**: ユーザー入力は必ず`textContent`で表示
-- **lastErrorチェック**: 全storage操作で`chrome.runtime.lastError`を確認
+| 重要度 | 指摘 | 対応 |
+|--------|------|------|
+| P1 | `setupSectionToggleListener()`再呼び出し漏れ | Phase 4-2で再呼び出しを追加 |
+| P1 | 300ms単一setTimeoutの不確実性 | リトライロジック追加（最大5回） |
+| P2 | `updateAllInlineBadges()`のパフォーマンス | DOM上の表示要素のみ対象に変更 |
+| - | `processedProjects`リセット不要 | 既存コードで自動対応済み |
 
 ---
 
@@ -215,9 +228,9 @@ NoteFolder/
 3. ×ボタンでタグ削除 → バッジが即座に消える
 4. 「ルートに移動」で子タグ解除 → タグ名が即座に変わる
 5. プロジェクトを開いて戻る → フィルターUIが表示されている
-6. セクション切り替え → フィルターUIが維持される
+6. セクション切り替え（すべて/マイノートブック等）→ フィルターUIが維持される
 
 ---
 
-**最終更新**: 2025-12-31
-**ステータス**: 実装計画承認済み、実装待ち
+**作成日**: 2025-12-31
+**レビュー**: Codex MCP（2回）
