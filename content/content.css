@@ -520,3 +520,125 @@
 .nf-suggestion-item.nf-keyboard-focus {
   background-color: rgba(66, 133, 244, 0.3) !important;
 }
+
+/* ========================================
+   タグバッジ拡張（色分け対応）
+   ======================================== */
+
+.nf-tag-badge-text {
+  flex: 1;
+}
+
+.nf-tag-color-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 10px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.nf-tag-badge:hover .nf-tag-color-btn {
+  opacity: 1;
+}
+
+/* ========================================
+   カラーピッカー
+   ======================================== */
+
+.nf-color-picker {
+  position: absolute;
+  background-color: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 10001;
+  padding: 12px;
+  min-width: 180px;
+}
+
+.nf-color-picker-header {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 10px;
+}
+
+.nf-color-swatches {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.nf-color-swatch {
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+}
+
+.nf-color-swatch:hover {
+  transform: scale(1.15);
+}
+
+.nf-color-swatch.selected {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #4285f4;
+}
+
+.nf-color-swatch-none {
+  background-color: #444;
+  color: #888;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nf-color-inherit-info {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #444;
+  font-size: 11px;
+  color: #666;
+}
+
+/* ========================================
+   タグ階層表示（ツリービュー）
+   ======================================== */
+
+.nf-tag-tree-item {
+  position: relative;
+}
+
+.nf-tag-tree-item::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: #444;
+}
+
+.nf-dropdown-item.has-children .nf-dropdown-item-label::after {
+  content: ' ▸';
+  color: #666;
+  font-size: 10px;
+}
+
+/* タグ色インジケーター */
+.nf-tag-color-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.nf-tag-color-indicator.no-color {
+  background-color: transparent;
+  border: 1px solid #555;
+}

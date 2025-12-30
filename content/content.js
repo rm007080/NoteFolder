@@ -25,20 +25,328 @@ const EMOJI_SELECTOR = '[id^="project-"][id$="-emoji"]';
 // 処理済みプロジェクトを追跡するSet
 const processedProjects = new Set();
 
+// 階層タグの区切り文字
+const HIERARCHY_SEPARATOR = '/';
+
+// 現在のマイグレーションバージョン
+const CURRENT_MIGRATION_VERSION = 2;
+
+// タグカラーパレット（Google Material準拠）
+const TAG_COLOR_PALETTE = [
+  { value: null, label: 'なし' },
+  { value: '#4285f4', label: '青' },
+  { value: '#34a853', label: '緑' },
+  { value: '#fbbc04', label: '黄' },
+  { value: '#ea4335', label: '赤' },
+  { value: '#9c27b0', label: '紫' },
+  { value: '#00bcd4', label: '水色' },
+  { value: '#ff9800', label: 'オレンジ' },
+  { value: '#795548', label: '茶' }
+];
+
 // ========================================
 // キャッシュ
 // ========================================
 
 // キャッシュ変数
 const cache = {
-  allTags: [],
-  projects: new Map(),  // projectId -> projectData
-  initialized: false
+  allTags: [],           // 後方互換性のため残す（tagMetaから導出）
+  tagMeta: {},           // タグメタデータ（色など）
+  projects: new Map(),   // projectId -> projectData
+  initialized: false,
+  migrationDone: false
 };
 
 // 初期化待機用Promise
 let cacheReadyPromise = null;
 let cacheReadyResolve = null;
+
+// ========================================
+// 階層タグ関数
+// ========================================
+
+/**
+ * 階層タグをパースして配列で返す
+ * @param {string} tag - タグ名（例: "AI/機械学習/深層学習"）
+ * @returns {string[]} パーツの配列
+ */
+function parseHierarchicalTag(tag) {
+  return tag.split(HIERARCHY_SEPARATOR);
+}
+
+/**
+ * 親タグを取得
+ * @param {string} tag - タグ名
+ * @returns {string|null} 親タグ（ルートの場合はnull）
+ */
+function getParentTag(tag) {
+  const parts = tag.split(HIERARCHY_SEPARATOR);
+  if (parts.length <= 1) return null;
+  return parts.slice(0, -1).join(HIERARCHY_SEPARATOR);
+}
+
+/**
+ * 子タグを取得
+ * @param {string} parentTag - 親タグ名
+ * @param {string[]} allTags - 全タグリスト
+ * @returns {string[]} 子タグの配列
+ */
+function getChildTags(parentTag, allTags) {
+  return allTags.filter(tag =>
+    tag.startsWith(parentTag + HIERARCHY_SEPARATOR)
+  );
+}
+
+/**
+ * タグの深度を取得
+ * @param {string} tag - タグ名
+ * @returns {number} 深度（ルートは0）
+ */
+function getTagDepth(tag) {
+  return tag.split(HIERARCHY_SEPARATOR).length - 1;
+}
+
+// ========================================
+// tagMetaシャーディング
+// ========================================
+
+/**
+ * タグ名からシャードキーを取得
+ * @param {string} tagName - タグ名
+ * @returns {string} シャードキー
+ */
+function getShardKey(tagName) {
+  const firstChar = tagName.charAt(0).toUpperCase();
+  if (/[A-Z]/.test(firstChar)) return firstChar;
+  if (/[あ-ん]/.test(firstChar)) return 'あ';
+  if (/[ア-ン]/.test(firstChar)) return 'ア';
+  if (/[\u4e00-\u9fff]/.test(firstChar)) return firstChar;  // 漢字
+  return '_';
+}
+
+/**
+ * ストレージから全tagMetaを読み込む
+ * @param {Object} items - chrome.storage.sync.get(null)の結果
+ * @returns {Object} 統合されたtagMeta
+ */
+function loadTagMetaFromItems(items) {
+  const tagMeta = {};
+  for (const [key, value] of Object.entries(items)) {
+    if (key.startsWith('tagMeta:')) {
+      Object.assign(tagMeta, value);
+    }
+  }
+  return tagMeta;
+}
+
+/**
+ * tagMetaを保存（シャード分割）
+ * @param {string} tagName - タグ名
+ * @param {Object} data - タグメタデータ
+ * @returns {Promise<boolean>}
+ */
+async function saveTagMeta(tagName, data) {
+  return new Promise((resolve) => {
+    const shardKey = `tagMeta:${getShardKey(tagName)}`;
+    chrome.storage.sync.get({ [shardKey]: {} }, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage read error:', chrome.runtime.lastError.message);
+        resolve(false);
+        return;
+      }
+      const shard = result[shardKey] || {};
+      shard[tagName] = data;
+      chrome.storage.sync.set({ [shardKey]: shard }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage write error:', chrome.runtime.lastError.message);
+          resolve(false);
+          return;
+        }
+        // キャッシュも更新
+        cache.tagMeta[tagName] = data;
+        resolve(true);
+      });
+    });
+  });
+}
+
+/**
+ * tagMetaから特定のタグを削除
+ * @param {string} tagName - 削除するタグ名
+ * @returns {Promise<boolean>}
+ */
+async function removeTagMeta(tagName) {
+  return new Promise((resolve) => {
+    const shardKey = `tagMeta:${getShardKey(tagName)}`;
+    chrome.storage.sync.get({ [shardKey]: {} }, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage read error:', chrome.runtime.lastError.message);
+        resolve(false);
+        return;
+      }
+      const shard = result[shardKey] || {};
+      delete shard[tagName];
+      chrome.storage.sync.set({ [shardKey]: shard }, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage write error:', chrome.runtime.lastError.message);
+          resolve(false);
+          return;
+        }
+        // キャッシュも更新
+        delete cache.tagMeta[tagName];
+        resolve(true);
+      });
+    });
+  });
+}
+
+// ========================================
+// タグ色管理
+// ========================================
+
+/**
+ * タグの色を取得（親からの継承あり）
+ * @param {string} tagName - タグ名
+ * @returns {string|null} 色コード（未設定の場合はnull）
+ */
+function getTagColor(tagName) {
+  // 自身の色があればそれを返す
+  const meta = cache.tagMeta[tagName];
+  if (meta?.color) {
+    return meta.color;
+  }
+
+  // 親タグの色を継承
+  const parentTag = getParentTag(tagName);
+  if (parentTag) {
+    return getTagColor(parentTag);
+  }
+
+  return null;
+}
+
+/**
+ * タグの色を設定
+ * @param {string} tagName - タグ名
+ * @param {string|null} color - 色コード（nullで解除）
+ * @returns {Promise<boolean>}
+ */
+async function setTagColor(tagName, color) {
+  const currentMeta = cache.tagMeta[tagName] || {};
+  const newMeta = { ...currentMeta, color: color };
+  return saveTagMeta(tagName, newMeta);
+}
+
+/**
+ * タグの色がカスタム設定されているか（継承ではなく）
+ * @param {string} tagName - タグ名
+ * @returns {boolean}
+ */
+function hasCustomColor(tagName) {
+  const meta = cache.tagMeta[tagName];
+  return meta?.color != null;
+}
+
+// ========================================
+// マイグレーション
+// ========================================
+
+/**
+ * 必要に応じてデータをマイグレーション
+ * @param {Object} items - chrome.storage.sync.get(null)の結果
+ * @returns {Promise<Object>} マイグレーション後のitems
+ */
+async function migrateDataIfNeeded(items) {
+  const currentVersion = items._migrationVersion || 0;
+
+  // マイグレーション済み
+  if (currentVersion >= CURRENT_MIGRATION_VERSION) {
+    cache.migrationDone = true;
+    return items;
+  }
+
+  // Step 1: allTags → tagMeta への移行
+  if (items.allTags && !loadTagMetaFromItems(items)) {
+    const tagMetaShards = {};
+    for (const tag of items.allTags) {
+      const shardKey = `tagMeta:${getShardKey(tag)}`;
+      if (!tagMetaShards[shardKey]) {
+        tagMetaShards[shardKey] = {};
+      }
+      tagMetaShards[shardKey][tag] = { color: null };
+    }
+    // シャード別に保存
+    for (const [key, value] of Object.entries(tagMetaShards)) {
+      await new Promise((resolve) => {
+        chrome.storage.sync.set({ [key]: value }, () => {
+          if (chrome.runtime.lastError) {
+            console.error('Migration error:', chrome.runtime.lastError.message);
+          }
+          resolve();
+        });
+      });
+    }
+  }
+
+  // Step 2: project.pinned のデフォルト値設定
+  const projectUpdates = {};
+  for (const [key, value] of Object.entries(items)) {
+    if (key.startsWith('project:') && value.pinned === undefined) {
+      value.pinned = false;
+      projectUpdates[key] = value;
+    }
+  }
+  if (Object.keys(projectUpdates).length > 0) {
+    await new Promise((resolve) => {
+      chrome.storage.sync.set(projectUpdates, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Migration error:', chrome.runtime.lastError.message);
+        }
+        resolve();
+      });
+    });
+  }
+
+  // Step 3: マイグレーション完了フラグ
+  await new Promise((resolve) => {
+    chrome.storage.sync.set({ _migrationVersion: CURRENT_MIGRATION_VERSION }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Migration error:', chrome.runtime.lastError.message);
+      }
+      resolve();
+    });
+  });
+
+  cache.migrationDone = true;
+
+  // 更新後のデータを再読み込み
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(null, (newItems) => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage read error:', chrome.runtime.lastError.message);
+        resolve(items);
+        return;
+      }
+      resolve(newItems);
+    });
+  });
+}
+
+// ========================================
+// タグ名取得（互換性レイヤー）
+// ========================================
+
+/**
+ * 全タグ名を取得（tagMetaから導出、allTagsはフォールバック）
+ * @returns {string[]}
+ */
+function getAllTagNames() {
+  const tagMetaKeys = Object.keys(cache.tagMeta);
+  if (tagMetaKeys.length > 0) {
+    return tagMetaKeys.sort((a, b) => a.localeCompare(b, 'ja'));
+  }
+  return cache.allTags || [];
+}
 
 /**
  * キャッシュを初期化（ストレージから全データ読み込み）
@@ -49,7 +357,7 @@ function initCache() {
     return cacheReadyPromise;
   }
 
-  cacheReadyPromise = new Promise((resolve) => {
+  cacheReadyPromise = new Promise(async (resolve) => {
     cacheReadyResolve = resolve;
 
     if (!isStorageAvailable()) {
@@ -58,7 +366,7 @@ function initCache() {
       return;
     }
 
-    chrome.storage.sync.get(null, (items) => {
+    chrome.storage.sync.get(null, async (items) => {
       if (chrome.runtime.lastError) {
         console.error('Cache init error:', chrome.runtime.lastError.message);
         cache.initialized = true;
@@ -66,8 +374,14 @@ function initCache() {
         return;
       }
 
-      // allTagsをキャッシュ
+      // マイグレーションを実行
+      items = await migrateDataIfNeeded(items);
+
+      // allTagsをキャッシュ（後方互換性）
       cache.allTags = items.allTags || [];
+
+      // tagMetaをキャッシュ
+      cache.tagMeta = loadTagMetaFromItems(items);
 
       // プロジェクトデータをキャッシュ
       cache.projects.clear();
@@ -100,11 +414,11 @@ function ensureCacheReady() {
 }
 
 /**
- * キャッシュからallTagsを取得
+ * キャッシュからallTagsを取得（互換性のため残す - getAllTagNamesを推奨）
  * @returns {string[]}
  */
 function getCachedAllTags() {
-  return cache.allTags;
+  return getAllTagNames();
 }
 
 /**
@@ -155,6 +469,11 @@ function setupStorageListener() {
     for (const [key, { newValue }] of Object.entries(changes)) {
       if (key === 'allTags') {
         cache.allTags = newValue || [];
+      } else if (key.startsWith('tagMeta:')) {
+        // tagMetaシャードの更新
+        if (newValue) {
+          Object.assign(cache.tagMeta, newValue);
+        }
       } else if (key.startsWith('project:')) {
         if (newValue) {
           cache.projects.set(newValue.id, newValue);
@@ -166,6 +485,49 @@ function setupStorageListener() {
       }
     }
   });
+}
+
+// ========================================
+// プロジェクト名キャプチャ
+// ========================================
+
+/**
+ * DOMからプロジェクト名を取得
+ * @param {string} projectId - プロジェクトID
+ * @returns {string} プロジェクト名（取得できない場合は空文字）
+ */
+function getProjectNameFromDOM(projectId) {
+  const emojiEl = document.getElementById(`project-${projectId}-emoji`);
+  if (!emojiEl) return '';
+
+  const card = emojiEl.closest('mat-card.project-button-card');
+  if (!card) return '';
+
+  const titleEl = card.querySelector(
+    '.project-button-title, .mdc-card__title, [data-testid="project-title"]'
+  );
+  return titleEl?.textContent?.trim() || '';
+}
+
+/**
+ * プロジェクト名が変更されていたら同期
+ * @param {string} projectId - プロジェクトID
+ */
+function syncProjectNameIfChanged(projectId) {
+  const currentName = getProjectNameFromDOM(projectId);
+  const cachedProject = getCachedProject(projectId);
+
+  if (cachedProject && cachedProject.name !== currentName && currentName) {
+    cachedProject.name = currentName;
+    chrome.storage.sync.set({ [`project:${projectId}`]: cachedProject }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage write error:', chrome.runtime.lastError.message);
+        return;
+      }
+      // キャッシュも更新
+      cache.projects.set(projectId, cachedProject);
+    });
+  }
 }
 
 // ========================================
@@ -327,18 +689,63 @@ function validateTagName(tag) {
     return { valid: false, error: 'タグ名は50文字以内にしてください' };
   }
 
+  // 階層タグのバリデーション
+  if (trimmed.includes(HIERARCHY_SEPARATOR)) {
+    const parts = trimmed.split(HIERARCHY_SEPARATOR);
+    // 空のパーツがないかチェック
+    if (parts.some(p => !p.trim())) {
+      return { valid: false, error: '階層区切り(/)の前後に空白は使えません' };
+    }
+  }
+
   return { valid: true, tag: trimmed };
 }
 
 /**
- * allTagsを正規化（重複排除、空文字除去、ソート）
+ * allTagsを正規化（重複排除、空文字除去、階層順ソート）
  * @param {string[]} allTags
  * @returns {string[]}
  */
 function normalizeAllTags(allTags) {
   return [...new Set(allTags)]
     .filter(tag => tag && tag.trim())
-    .sort((a, b) => a.localeCompare(b, 'ja'));
+    .sort((a, b) => {
+      // 階層タグを考慮したソート
+      // 親タグが先に来るように
+      const partsA = a.split(HIERARCHY_SEPARATOR);
+      const partsB = b.split(HIERARCHY_SEPARATOR);
+
+      // 共通の深さまで比較
+      const minLen = Math.min(partsA.length, partsB.length);
+      for (let i = 0; i < minLen; i++) {
+        const cmp = partsA[i].localeCompare(partsB[i], 'ja');
+        if (cmp !== 0) return cmp;
+      }
+      // 深さが浅い方（親）を先に
+      return partsA.length - partsB.length;
+    });
+}
+
+/**
+ * 親タグが存在しない場合は自動作成
+ * @param {string} tag - タグ名
+ * @returns {Promise<void>}
+ */
+async function ensureParentTagExists(tag) {
+  const parentTag = getParentTag(tag);
+  if (!parentTag) return;
+
+  // 親タグがキャッシュに存在しない場合は作成
+  if (!cache.tagMeta[parentTag]) {
+    await saveTagMeta(parentTag, { color: null });
+    // 後方互換性のためallTagsにも追加
+    if (!cache.allTags.includes(parentTag)) {
+      cache.allTags = normalizeAllTags([...cache.allTags, parentTag]);
+    }
+  }
+
+  // 再帰的に親の親も確認
+  await ensureParentTagExists(parentTag);
 }
 
 // ========================================
@@ -351,47 +758,63 @@ function normalizeAllTags(allTags) {
  * @param {string} newTag
  * @returns {Promise<boolean>}
  */
-function addTagToProject(projectId, newTag) {
+async function addTagToProject(projectId, newTag) {
   const validation = validateTagName(newTag);
   if (!validation.valid) {
     showToast(validation.error);
-    return Promise.resolve(false);
+    return false;
   }
 
   const normalizedTag = validation.tag;
 
+  // キャッシュからデータを取得
+  const cachedProject = getCachedProject(projectId);
+  const cachedAllTags = getCachedAllTags();
+
+  // プロジェクト名をDOMから取得
+  const projectName = getProjectNameFromDOM(projectId);
+
+  // プロジェクトデータを作成または更新
+  const project = cachedProject ? { ...cachedProject } : {
+    id: projectId,
+    name: projectName,
+    tags: [],
+    pinned: false,
+    updatedAt: Date.now()
+  };
+
+  // プロジェクト名を更新（空でない場合）
+  if (projectName && project.name !== projectName) {
+    project.name = projectName;
+  }
+
+  // 重複チェック
+  if (project.tags.includes(normalizedTag)) {
+    showToast('このタグは既に追加されています');
+    return false;
+  }
+
+  // 親タグが存在しない場合は自動作成
+  await ensureParentTagExists(normalizedTag);
+
+  // タグ追加
+  project.tags = [...project.tags, normalizedTag];
+  project.updatedAt = Date.now();
+
+  // tagMetaに新しいタグを追加（存在しない場合）
+  if (!cache.tagMeta[normalizedTag]) {
+    await saveTagMeta(normalizedTag, { color: null });
+  }
+
+  // allTags更新（後方互換性）
+  let allTags = [...cachedAllTags];
+  if (!allTags.includes(normalizedTag)) {
+    allTags.push(normalizedTag);
+  }
+  allTags = normalizeAllTags(allTags);
+
+  // 保存
   return new Promise((resolve) => {
-    // キャッシュからデータを取得
-    const cachedProject = getCachedProject(projectId);
-    const cachedAllTags = getCachedAllTags();
-
-    // プロジェクトデータを作成または更新
-    const project = cachedProject ? { ...cachedProject } : {
-      id: projectId,
-      name: '',
-      tags: [],
-      updatedAt: Date.now()
-    };
-
-    // 重複チェック
-    if (project.tags.includes(normalizedTag)) {
-      showToast('このタグは既に追加されています');
-      resolve(false);
-      return;
-    }
-
-    // タグ追加
-    project.tags = [...project.tags, normalizedTag];
-    project.updatedAt = Date.now();
-
-    // allTags更新
-    let allTags = [...cachedAllTags];
-    if (!allTags.includes(normalizedTag)) {
-      allTags.push(normalizedTag);
-    }
-    allTags = normalizeAllTags(allTags);
-
-    // 保存
     chrome.storage.sync.set(
       { [`project:${projectId}`]: project, allTags: allTags },
       () => {
@@ -450,44 +873,63 @@ function removeTagFromProject(projectId, tagToRemove) {
 /**
  * allTagsからタグを完全削除（全プロジェクトからも削除）
  * @param {string} tagToRemove - 削除するタグ
+ * @param {boolean} skipConfirm - 確認ダイアログをスキップするかどうか
  * @returns {Promise<boolean>}
  */
-function removeTagFromAllProjects(tagToRemove) {
+async function removeTagFromAllProjects(tagToRemove, skipConfirm = false) {
+  // キャッシュから現在のデータを取得
+  const cachedAllTags = getCachedAllTags();
+
+  // タグが存在しない場合
+  if (!cachedAllTags.includes(tagToRemove) && !cache.tagMeta[tagToRemove]) {
+    showToast('タグが見つかりません');
+    return false;
+  }
+
+  // 子タグを取得
+  const childTags = getChildTags(tagToRemove, cachedAllTags);
+
+  // 子タグがある場合は確認
+  if (!skipConfirm && childTags.length > 0) {
+    const confirmed = confirm(
+      `「${tagToRemove}」を削除すると、子タグ（${childTags.length}個）も削除されます。続行しますか？`
+    );
+    if (!confirmed) return false;
+  }
+
+  // 削除対象のタグリスト（親 + 子）
+  const tagsToRemove = [tagToRemove, ...childTags];
+
+  // allTagsから削除
+  const newAllTags = cachedAllTags.filter(tag => !tagsToRemove.includes(tag));
+
+  // 全プロジェクトからこれらのタグを削除
+  const updatedProjects = {};
+
+  for (const [projectId, projectData] of cache.projects) {
+    if (projectData.tags && projectData.tags.some(t => tagsToRemove.includes(t))) {
+      const updatedProject = {
+        ...projectData,
+        tags: projectData.tags.filter(tag => !tagsToRemove.includes(tag)),
+        updatedAt: Date.now()
+      };
+      updatedProjects[`project:${projectId}`] = updatedProject;
+    }
+  }
+
+  // tagMetaから削除
+  for (const tag of tagsToRemove) {
+    await removeTagMeta(tag);
+  }
+
+  // 更新データを作成
+  const updateData = {
+    allTags: newAllTags,
+    ...updatedProjects
+  };
+
+  // 保存
   return new Promise((resolve) => {
-    // キャッシュから現在のデータを取得
-    const cachedAllTags = getCachedAllTags();
-
-    // タグが存在しない場合
-    if (!cachedAllTags.includes(tagToRemove)) {
-      showToast('タグが見つかりません');
-      resolve(false);
-      return;
-    }
-
-    // allTagsから削除
-    const newAllTags = cachedAllTags.filter(tag => tag !== tagToRemove);
-
-    // 全プロジェクトからこのタグを削除
-    const updatedProjects = {};
-
-    for (const [projectId, projectData] of cache.projects) {
-      if (projectData.tags && projectData.tags.includes(tagToRemove)) {
-        const updatedProject = {
-          ...projectData,
-          tags: projectData.tags.filter(tag => tag !== tagToRemove),
-          updatedAt: Date.now()
-        };
-        updatedProjects[`project:${projectId}`] = updatedProject;
-      }
-    }
-
-    // 更新データを作成
-    const updateData = {
-      allTags: newAllTags,
-      ...updatedProjects
-    };
-
-    // 保存
     chrome.storage.sync.set(updateData, () => {
       if (chrome.runtime.lastError) {
         console.error('Storage write error:', chrome.runtime.lastError.message);
@@ -503,7 +945,10 @@ function removeTagFromAllProjects(tagToRemove) {
         cache.projects.set(projectId, value);
       }
 
-      showToast(`タグ「${tagToRemove}」を削除しました`);
+      const message = childTags.length > 0
+        ? `タグ「${tagToRemove}」と子タグ（${childTags.length}個）を削除しました`
+        : `タグ「${tagToRemove}」を削除しました`;
+      showToast(message);
       resolve(true);
     });
   });
@@ -530,13 +975,46 @@ function hideTagPopover() {
  * タグバッジを作成
  * @param {string} tagName
  * @param {function} onRemove - 削除時のコールバック
+ * @param {Object} [options] - オプション
+ * @param {boolean} [options.showColorPicker=false] - カラーピッカーを表示するか
+ * @param {function} [options.onColorChange] - 色変更時のコールバック
  * @returns {HTMLElement}
  */
-function createTagBadge(tagName, onRemove) {
+function createTagBadge(tagName, onRemove, options = {}) {
+  const { showColorPicker = false, onColorChange } = options;
+
   const badge = document.createElement('span');
   badge.className = 'nf-tag-badge';
-  badge.textContent = tagName;
+  badge.setAttribute('data-tag', tagName);
 
+  // タグの色を適用
+  const color = getTagColor(tagName);
+  if (color) {
+    badge.style.backgroundColor = color;
+    // コントラストに応じてテキスト色を調整
+    badge.style.color = getContrastColor(color);
+  }
+
+  // タグ名テキスト
+  const tagText = document.createElement('span');
+  tagText.className = 'nf-tag-badge-text';
+  tagText.textContent = tagName;
+  badge.appendChild(tagText);
+
+  // カラーピッカーボタン（オプション）
+  if (showColorPicker) {
+    const colorBtn = document.createElement('button');
+    colorBtn.className = 'nf-tag-color-btn';
+    colorBtn.textContent = '🎨';
+    colorBtn.setAttribute('title', '色を変更');
+    colorBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showColorPickerPopover(tagName, colorBtn, onColorChange);
+    });
+    badge.appendChild(colorBtn);
+  }
+
+  // 削除ボタン
   const removeBtn = document.createElement('button');
   removeBtn.className = 'nf-tag-badge-remove';
   removeBtn.textContent = '×';
@@ -550,6 +1028,124 @@ function createTagBadge(tagName, onRemove) {
 }
 
 /**
+ * 背景色に対するコントラストの良いテキスト色を返す
+ * @param {string} hexColor - 16進数カラーコード
+ * @returns {string} '#fff' または '#000'
+ */
+function getContrastColor(hexColor) {
+  const hex = hexColor.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  // 輝度を計算
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? '#000' : '#fff';
+}
+
+/**
+ * カラーピッカーポップオーバーを表示
+ * @param {string} tagName - タグ名
+ * @param {HTMLElement} anchorElement - アンカー要素
+ * @param {function} [onColorChange] - 色変更時のコールバック
+ */
+function showColorPickerPopover(tagName, anchorElement, onColorChange) {
+  // 既存のカラーピッカーを削除
+  const existing = document.querySelector('.nf-color-picker');
+  if (existing) {
+    existing.remove();
+  }
+
+  const picker = document.createElement('div');
+  picker.className = 'nf-color-picker';
+
+  // ヘッダー
+  const header = document.createElement('div');
+  header.className = 'nf-color-picker-header';
+  header.textContent = 'タグの色を選択';
+  picker.appendChild(header);
+
+  // カラースウォッチコンテナ
+  const swatchContainer = document.createElement('div');
+  swatchContainer.className = 'nf-color-swatches';
+
+  const currentColor = getTagColor(tagName);
+
+  TAG_COLOR_PALETTE.forEach(({ value, label }) => {
+    const swatch = document.createElement('button');
+    swatch.className = 'nf-color-swatch';
+    swatch.setAttribute('title', label);
+    swatch.setAttribute('data-color', value || '');
+
+    if (value) {
+      swatch.style.backgroundColor = value;
+    } else {
+      // 「なし」の場合
+      swatch.classList.add('nf-color-swatch-none');
+      swatch.textContent = '✕';
+    }
+
+    // 現在の色にチェックマーク
+    if (value === currentColor || (value === null && currentColor === null)) {
+      swatch.classList.add('selected');
+    }
+
+    swatch.addEventListener('click', async () => {
+      const success = await setTagColor(tagName, value);
+      if (success) {
+        picker.remove();
+        if (onColorChange) {
+          onColorChange();
+        }
+        showToast(value ? `タグ「${tagName}」の色を変更しました` : `タグ「${tagName}」の色を解除しました`);
+      }
+    });
+
+    swatchContainer.appendChild(swatch);
+  });
+
+  picker.appendChild(swatchContainer);
+
+  // 継承情報
+  const parentTag = getParentTag(tagName);
+  if (parentTag && !hasCustomColor(tagName)) {
+    const inheritInfo = document.createElement('div');
+    inheritInfo.className = 'nf-color-inherit-info';
+    inheritInfo.textContent = `親タグ「${parentTag}」から色を継承`;
+    picker.appendChild(inheritInfo);
+  }
+
+  // 位置を計算
+  document.body.appendChild(picker);
+  const rect = anchorElement.getBoundingClientRect();
+  const pickerRect = picker.getBoundingClientRect();
+
+  let left = rect.left + window.scrollX;
+  let top = rect.bottom + window.scrollY + 4;
+
+  // 画面端をはみ出さないように調整
+  if (left + pickerRect.width > window.innerWidth) {
+    left = window.innerWidth - pickerRect.width - 8;
+  }
+  if (top + pickerRect.height > window.innerHeight + window.scrollY) {
+    top = rect.top + window.scrollY - pickerRect.height - 4;
+  }
+
+  picker.style.left = `${Math.max(8, left)}px`;
+  picker.style.top = `${Math.max(8, top)}px`;
+
+  // 外側クリックで閉じる
+  const handleClickOutside = (e) => {
+    if (!picker.contains(e.target) && !anchorElement.contains(e.target)) {
+      picker.remove();
+      document.removeEventListener('click', handleClickOutside);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('click', handleClickOutside);
+  }, 0);
+}
+
+/**
  * タグ入力ポップオーバーを表示
  * @param {HTMLElement} targetElement - フォルダアイコン要素
  * @param {string} projectId
@@ -557,6 +1153,9 @@ function createTagBadge(tagName, onRemove) {
 function showTagPopover(targetElement, projectId) {
   // 既存のポップオーバーを閉じる
   hideTagPopover();
+
+  // プロジェクト名が変更されていたら同期
+  syncProjectNameIfChanged(projectId);
 
   // ポップオーバーを作成
   const popover = document.createElement('div');
@@ -680,6 +1279,9 @@ function showTagPopover(targetElement, projectId) {
             updateUI();
             updateFolderIconState(projectId);
           }
+        }, {
+          showColorPicker: true,
+          onColorChange: () => updateUI()
         });
         tagsList.appendChild(badge);
       });
@@ -926,7 +1528,19 @@ function injectAllFolderIcons() {
 // フィルターUI
 // ========================================
 
-// 現在選択中のフィルタータグ
+// フィルタータイプ定義
+const FilterType = {
+  TAG: 'tag',           // 特定タグでフィルター
+  TAG_PARENT: 'tagParent',  // 親タグでフィルター（子を含む）
+  UNTAGGED: 'untagged', // タグなしプロジェクト
+  TEXT: 'text',         // テキスト検索
+  PINNED: 'pinned'      // ピン留めのみ
+};
+
+// 現在適用中のフィルター配列
+let currentFilters = [];
+
+// 現在選択中のフィルタータグ（後方互換性）
 let selectedFilterTags = [];
 
 // 現在のソート設定
@@ -980,57 +1594,118 @@ function saveOriginalCardOrder() {
 }
 
 /**
- * プロジェクトをタグでフィルタリング
- * @param {string[]} tags - フィルターするタグ（空配列なら全表示）
+ * カードからプロジェクトIDを抽出
+ * @param {HTMLElement} card - プロジェクトカード要素
+ * @returns {string|null} プロジェクトID
  */
-function filterProjectsByTags(tags) {
-  // 元の順序を使用（未保存なら現在のカードを使用）
+function extractProjectIdFromCard(card) {
+  const emojiEl = card.querySelector(EMOJI_SELECTOR);
+  if (!emojiEl) return null;
+  return extractProjectIdFromEmoji(emojiEl);
+}
+
+/**
+ * 構造化フィルターを適用
+ */
+function applyFilters() {
   const cards = originalCardOrder.length > 0
     ? originalCardOrder
     : Array.from(getProjectCards());
 
   if (cards.length === 0) return;
 
-  if (tags.length === 0) {
-    // フィルターなし: 全カード表示（project-button要素に適用）
+  // フィルターが空なら全表示
+  if (currentFilters.length === 0) {
     cards.forEach(card => {
       const gridItem = card.closest('project-button') || card;
       gridItem.style.display = '';
     });
-    // 現在のソート設定を再適用
     sortProjects(currentSortType);
     return;
   }
 
-  // キャッシュから全プロジェクトのタグマップを取得
-  const projectTags = getCachedAllProjectTags();
-
-  // 各カードの表示/非表示を制御（project-button要素に適用）
   cards.forEach(card => {
-    // グリッドアイテムであるproject-button要素を取得
+    const projectId = extractProjectIdFromCard(card);
+    const project = getCachedProject(projectId);
     const gridItem = card.closest('project-button') || card;
 
-    const emojiEl = card.querySelector(EMOJI_SELECTOR);
-    if (!emojiEl) {
-      gridItem.style.display = '';
-      return;
-    }
+    // 全てのフィルター条件を満たすかチェック
+    const visible = currentFilters.every(filter => {
+      switch (filter.type) {
+        case FilterType.TAG:
+          return project?.tags?.includes(filter.value);
 
-    const projectId = extractProjectIdFromEmoji(emojiEl);
-    if (!projectId) {
-      gridItem.style.display = '';
-      return;
-    }
+        case FilterType.TAG_PARENT:
+          // 親タグ選択時は子タグも含める
+          return project?.tags?.some(t =>
+            t === filter.value || t.startsWith(filter.value + HIERARCHY_SEPARATOR)
+          );
 
-    const cardTags = projectTags[projectId] || [];
-    const hasMatchingTag = tags.some(tag => cardTags.includes(tag));
+        case FilterType.UNTAGGED:
+          return !project?.tags?.length;
 
-    // project-button要素に対してdisplay制御（グリッドの歯抜け防止）
-    gridItem.style.display = hasMatchingTag ? '' : 'none';
+        case FilterType.TEXT:
+          return project?.name?.toLowerCase().includes(filter.value.toLowerCase());
+
+        case FilterType.PINNED:
+          return project?.pinned === true;
+
+        default:
+          return true;
+      }
+    });
+
+    gridItem.style.display = visible ? '' : 'none';
   });
 
-  // 現在のソート設定を再適用（orderプロパティで順序制御）
   sortProjects(currentSortType);
+}
+
+/**
+ * フィルターを追加
+ * @param {string} type - フィルタータイプ
+ * @param {*} value - フィルター値
+ */
+function addFilter(type, value) {
+  // 同じフィルターが既にあるかチェック
+  const exists = currentFilters.some(f => f.type === type && f.value === value);
+  if (!exists) {
+    currentFilters.push({ type, value });
+  }
+}
+
+/**
+ * フィルターを削除
+ * @param {string} type - フィルタータイプ
+ * @param {*} value - フィルター値
+ */
+function removeFilter(type, value) {
+  currentFilters = currentFilters.filter(f => !(f.type === type && f.value === value));
+}
+
+/**
+ * 全フィルターをクリア
+ */
+function clearAllFilters() {
+  currentFilters = [];
+  selectedFilterTags = [];  // 後方互換性
+}
+
+/**
+ * プロジェクトをタグでフィルタリング（後方互換性のためのラッパー）
+ * @param {string[]} tags - フィルターするタグ（空配列なら全表示）
+ */
+function filterProjectsByTags(tags) {
+  // 既存のタグフィルターをクリア
+  currentFilters = currentFilters.filter(f => f.type !== FilterType.TAG);
+
+  // 新しいタグフィルターを追加
+  for (const tag of tags) {
+    addFilter(FilterType.TAG, tag);
+  }
+
+  // 構造化フィルターを適用
+  applyFilters();
 }
 
 /**
@@ -1287,13 +1962,17 @@ function showTagDropdown(button) {
   tagListContainer.className = 'nf-dropdown-list';
   dropdown.appendChild(tagListContainer);
 
-  // タグリストを描画する関数
+  // タグリストを描画する関数（階層表示対応）
   const renderTagList = (filterText = '') => {
     tagListContainer.innerHTML = '';
 
-    const filteredTags = allTags.filter(tag =>
-      tag.toLowerCase().includes(filterText.toLowerCase())
-    );
+    let filteredTags = allTags;
+    if (filterText) {
+      // 検索時はフラット表示
+      filteredTags = allTags.filter(tag =>
+        tag.toLowerCase().includes(filterText.toLowerCase())
+      );
+    }
 
     if (filteredTags.length === 0) {
       const noTags = document.createElement('div');
@@ -1303,67 +1982,8 @@ function showTagDropdown(button) {
       return;
     }
 
-    filteredTags.forEach(tag => {
-      const item = document.createElement('div');
-      item.className = 'nf-dropdown-item';
-      item.setAttribute('data-tag', tag);
-      item.setAttribute('tabindex', '-1');
-      if (selectedFilterTags.includes(tag)) {
-        item.classList.add('selected');
-      }
-
-      const checkbox = document.createElement('span');
-      checkbox.className = 'nf-dropdown-checkbox';
-      checkbox.textContent = selectedFilterTags.includes(tag) ? '✓' : '';
-
-      const label = document.createElement('span');
-      label.className = 'nf-dropdown-item-label';
-      label.textContent = tag;
-
-      // 削除ボタン
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'nf-tag-delete-btn';
-      deleteBtn.textContent = '×';
-      deleteBtn.setAttribute('title', 'タグを削除');
-      deleteBtn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        // 確認ダイアログ
-        const confirmed = confirm(
-          `タグ「${tag}」を削除しますか？\n\nこのタグを使用している全てのプロジェクトからも削除されます。`
-        );
-        if (confirmed) {
-          const success = await removeTagFromAllProjects(tag);
-          if (success) {
-            // 選択中のフィルターからも削除
-            selectedFilterTags = selectedFilterTags.filter(t => t !== tag);
-            updateFilterUI();
-            filterProjectsByTags(selectedFilterTags);
-            // ドロップダウンを再描画
-            renderTagList(searchInput.value);
-            // フォルダアイコンの状態を更新
-            for (const [projectId] of cache.projects) {
-              updateFolderIconState(projectId);
-            }
-          }
-        }
-      });
-
-      item.appendChild(checkbox);
-      item.appendChild(label);
-      item.appendChild(deleteBtn);
-
-      item.addEventListener('click', (e) => {
-        // 削除ボタン以外をクリックした場合のみ選択トグル
-        if (!e.target.classList.contains('nf-tag-delete-btn')) {
-          toggleTagSelection(item, tag, checkbox);
-        }
-      });
-
-      tagListContainer.appendChild(item);
-    });
-
     // タグ選択をトグルする関数
-    function toggleTagSelection(item, tag, checkbox) {
+    const toggleTagSelection = (item, tag, checkbox) => {
       if (selectedFilterTags.includes(tag)) {
         selectedFilterTags = selectedFilterTags.filter(t => t !== tag);
         item.classList.remove('selected');
@@ -1375,6 +1995,115 @@ function showTagDropdown(button) {
       }
       updateFilterUI();
       filterProjectsByTags(selectedFilterTags);
+    };
+
+    // タグアイテムを作成する関数
+    const createTagItem = (tag, depth = 0) => {
+      const item = document.createElement('div');
+      item.className = 'nf-dropdown-item';
+      item.setAttribute('data-tag', tag);
+      item.setAttribute('tabindex', '-1');
+
+      // 階層深度に応じたインデント
+      if (depth > 0) {
+        item.classList.add('nf-tag-tree-item');
+        item.style.paddingLeft = `${16 + depth * 16}px`;
+      }
+
+      if (selectedFilterTags.includes(tag)) {
+        item.classList.add('selected');
+      }
+
+      // 色インジケーター
+      const colorIndicator = document.createElement('span');
+      colorIndicator.className = 'nf-tag-color-indicator';
+      const tagColor = getTagColor(tag);
+      if (tagColor) {
+        colorIndicator.style.backgroundColor = tagColor;
+      } else {
+        colorIndicator.classList.add('no-color');
+      }
+
+      const checkbox = document.createElement('span');
+      checkbox.className = 'nf-dropdown-checkbox';
+      checkbox.textContent = selectedFilterTags.includes(tag) ? '✓' : '';
+
+      const label = document.createElement('span');
+      label.className = 'nf-dropdown-item-label';
+      // 階層タグの場合は最後の部分のみ表示（検索時以外）
+      if (!filterText && depth > 0) {
+        const parts = tag.split(HIERARCHY_SEPARATOR);
+        label.textContent = parts[parts.length - 1];
+      } else {
+        label.textContent = tag;
+      }
+
+      // 子タグがあるかチェック
+      const hasChildren = allTags.some(t =>
+        t !== tag && t.startsWith(tag + HIERARCHY_SEPARATOR)
+      );
+      if (hasChildren) {
+        item.classList.add('has-children');
+      }
+
+      // 削除ボタン
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'nf-tag-delete-btn';
+      deleteBtn.textContent = '×';
+      deleteBtn.setAttribute('title', hasChildren ? 'タグと子タグを削除' : 'タグを削除');
+      deleteBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const success = await removeTagFromAllProjects(tag);
+        if (success) {
+          selectedFilterTags = selectedFilterTags.filter(t => t !== tag && !t.startsWith(tag + HIERARCHY_SEPARATOR));
+          updateFilterUI();
+          filterProjectsByTags(selectedFilterTags);
+          renderTagList(searchInput.value);
+          for (const [projectId] of cache.projects) {
+            updateFolderIconState(projectId);
+          }
+        }
+      });
+
+      item.appendChild(colorIndicator);
+      item.appendChild(checkbox);
+      item.appendChild(label);
+      item.appendChild(deleteBtn);
+
+      item.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('nf-tag-delete-btn')) {
+          toggleTagSelection(item, tag, checkbox);
+        }
+      });
+
+      return item;
+    };
+
+    // 階層構造でレンダリング（検索時以外）
+    if (!filterText) {
+      // ルートタグ（親を持たないタグ）を取得
+      const rootTags = filteredTags.filter(tag => !getParentTag(tag));
+
+      const renderTagWithChildren = (tag, depth) => {
+        tagListContainer.appendChild(createTagItem(tag, depth));
+
+        // 直接の子タグを取得
+        const directChildren = filteredTags.filter(t => {
+          const parent = getParentTag(t);
+          return parent === tag;
+        });
+
+        directChildren.forEach(childTag => {
+          renderTagWithChildren(childTag, depth + 1);
+        });
+      };
+
+      rootTags.forEach(tag => renderTagWithChildren(tag, 0));
+    } else {
+      // 検索時はフラット表示
+      filteredTags.forEach(tag => {
+        tagListContainer.appendChild(createTagItem(tag, 0));
+      });
     }
   };
 
