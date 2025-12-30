@@ -412,12 +412,55 @@
   white-space: nowrap;
 }
 
+/* タグ使用統計カウント */
+.nf-tag-count {
+  color: #80868b;
+  font-size: 12px;
+  margin-left: auto;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+/* ドラッグ&ドロップ */
+.nf-dropdown-item[draggable="true"] {
+  cursor: grab;
+}
+
+.nf-dropdown-item[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.nf-dropdown-item.nf-dragging {
+  opacity: 0.5;
+  background-color: rgba(66, 133, 244, 0.3);
+}
+
+.nf-dropdown-item.nf-drop-target {
+  background-color: rgba(52, 168, 83, 0.3);
+  outline: 2px dashed #34a853;
+  outline-offset: -2px;
+}
+
+/* ルートへ移動ドロップゾーン */
+.nf-root-drop-zone {
+  padding: 8px 16px;
+  border-bottom: 1px solid #444;
+  color: #80868b;
+  font-size: 12px;
+  text-align: center;
+  transition: all 0.15s;
+}
+
+.nf-root-drop-zone.nf-drop-target {
+  background-color: rgba(52, 168, 83, 0.2);
+  color: #34a853;
+}
+
 /* タグ削除ボタン */
 .nf-tag-delete-btn {
   width: 20px;
   height: 20px;
   padding: 0;
-  margin-left: auto;
   background-color: transparent;
   color: #888;
   border: none;
@@ -641,4 +684,166 @@
 .nf-tag-color-indicator.no-color {
   background-color: transparent;
   border: 1px solid #555;
+}
+
+/* ========================================
+   インラインバッジ（タグ常時表示）
+   ======================================== */
+
+.nf-inline-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  max-width: 200px;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.nf-inline-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  background-color: #4285f4;
+  color: #fff;
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 80px;
+  cursor: default;
+}
+
+.nf-inline-badge-more {
+  background-color: #5f6368;
+  font-size: 9px;
+  padding: 2px 5px;
+}
+
+/* ========================================
+   検索入力欄
+   ======================================== */
+
+.nf-search-input {
+  padding: 6px 12px;
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #5f6368;
+  border-radius: 18px;
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s;
+  width: 140px;
+}
+
+.nf-search-input:focus {
+  border-color: #8ab4f8;
+  background-color: #2d2d2d;
+  width: 180px;
+}
+
+.nf-search-input::placeholder {
+  color: #888;
+}
+
+/* ========================================
+   タグなしオプション
+   ======================================== */
+
+.nf-untagged-option {
+  border-bottom: 1px solid #444;
+}
+
+.nf-untagged-icon {
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+/* フィルターバッジのバリエーション */
+.nf-filter-badge-text {
+  background-color: #5f6368;
+}
+
+.nf-filter-badge-untagged {
+  background-color: #795548;
+}
+
+.nf-filter-badge-pinned {
+  background-color: #fbbc04;
+  color: #000;
+}
+
+.nf-filter-badge-pinned .nf-filter-badge-remove {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.nf-filter-badge-pinned .nf-filter-badge-remove:hover {
+  color: #000;
+}
+
+.nf-filter-placeholder {
+  color: #888;
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* ========================================
+   ピン留めアイコン
+   ======================================== */
+
+.nf-pin-icon {
+  /* レイアウト */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  padding: 4px 6px;
+
+  /* 外観 */
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+
+  /* テキスト */
+  font-size: 16px;
+  line-height: 1;
+  color: #666;
+
+  /* アニメーション */
+  transition: all 0.2s ease;
+
+  /* その他 */
+  opacity: 0.5;
+
+  /* クリックイベント */
+  position: relative;
+  z-index: 1000;
+  pointer-events: auto !important;
+}
+
+.nf-pin-icon:hover {
+  opacity: 1;
+  color: #fbbc04;
+  transform: scale(1.15);
+}
+
+.nf-pin-icon:active {
+  transform: scale(0.95);
+}
+
+.nf-pin-icon:focus {
+  outline: 2px solid #fbbc04;
+  outline-offset: 2px;
+}
+
+/* ピン留め状態 */
+.nf-pin-icon.pinned {
+  opacity: 1;
+  color: #fbbc04;
+}
+
+.nf-pin-icon.pinned:hover {
+  color: #f9a825;
 }

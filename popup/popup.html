@@ -22,6 +22,22 @@
       </p>
     </section>
 
+    <!-- Phase 3: タグ使用統計 -->
+    <section class="tag-stats" id="tag-stats-section">
+      <h2>タグ使用統計</h2>
+      <div id="stats-loading" class="stats-loading">読み込み中...</div>
+      <div id="stats-empty" class="stats-empty" style="display: none;">タグがまだ登録されていません</div>
+      <table id="stats-table" class="stats-table" style="display: none;">
+        <thead>
+          <tr>
+            <th class="stats-th-tag">タグ</th>
+            <th class="stats-th-count">使用数</th>
+          </tr>
+        </thead>
+        <tbody id="stats-tbody"></tbody>
+      </table>
+    </section>
+
     <!-- 将来的な拡張用: 全タグ一覧、タグ削除など -->
     <section class="tag-input" style="display: none;">
       <h2>タグを追加:</h2>
