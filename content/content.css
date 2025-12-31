@@ -154,6 +154,11 @@
   min-height: 28px;
 }
 
+/* ポップオーバー内のタグリストは縦方向レイアウト */
+.nf-popover-tags > .nf-tags-list {
+  display: block;
+}
+
 /* ポップオーバー内の親子タグ分離表示 */
 .nf-popover-parent-tags {
   margin-bottom: 8px;
