@@ -10,85 +10,117 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 
 ## 現在の状況
 
-### ステータス: タグ表示改善 - 実装完了・テスト待ち
+### ステータス: 2つの改善機能 - 実装待ち
 
-`実装計画_タグ表示改善.md`に基づく5つの要件をすべて実装完了。
-
----
-
-## 実装完了した機能（2025-12-31）
-
-### 要件3+4: 高さ拡大 + リサイズ機能
-- **content.css**: `.nf-dropdown-list`の`max-height: 200px`を削除
-- **content.css**: リサイズハンドル用CSS `.nf-dropdown-resize-handle` 追加
-- **content.js**: 定数追加
-  - `DEFAULT_DROPDOWN_HEIGHT = 350`
-  - `MIN_DROPDOWN_HEIGHT = 100`
-  - `MAX_DROPDOWN_HEIGHT = 600`
-- **content.js**: 新規関数追加
-  - `getDropdownHeight()` - storageから高さ読込
-  - `saveDropdownHeight(height)` - storageに高さ保存
-- **content.js**: `showTagDropdown`をasync化、リサイズ処理実装
-
-### 要件5: 固定表示
-- **content.css**: `.nf-dropdown-fixed-options` 追加
-- **content.css**: `.nf-root-drop-zone:focus`, `.nf-untagged-option:focus` フォーカススタイル追加
-- **content.js**: 「ルートに移動」「タグなし」を`fixedOptionsContainer`に分離
-- **content.js**: `setupKeyboardNavigation`のセレクタを`.nf-dropdown-item, .nf-root-drop-zone`に拡張
-
-### 要件1: 親タグのみ表示
-- **content.js**: `createInlineBadges`を修正
-  - 子タグから親タグ名を導出（`tag.split('/')[0]`）
-  - 重複除去（Set使用）
-  - `+N`カウンターも親タグ数基準に計算
-  - ツールチップに該当する子タグを表示
-
-### 要件2: ポップオーバー改善
-- **content.css**: 親子タグ分離用CSS追加
-  - `.nf-popover-parent-tags`
-  - `.nf-popover-child-tags`
-  - `.nf-popover-section-label`
-  - D&D用CSS（`.nf-tag-badge[draggable]`, `.nf-dragging`, `.nf-drop-target-badge`）
-- **content.css**: `.nf-popover-tags > .nf-tags-list { display: block; }` 追加（縦方向レイアウト）
-- **content.js**: `reorderProjectTags(projectId, draggedParent, targetParent)` 関数追加
-- **content.js**: `createTagBadge`に`displayName`, `tooltipText`オプション追加
-- **content.js**: `showTagPopover`の`updateUI`を修正
-  - 上段: 親タグ（D&D可能）
-  - 下段: 子タグ（末尾部分のみ表示）
+`実装計画_UI改善v4.md`に基づく2つの改善を実装予定。計画はレビュー済み、重大な問題なし。
 
 ---
 
-## 修正したファイルと行番号
+## 実装予定の機能
 
-### content/content.css
-- 行150-160: `.nf-tags-list`とポップオーバー用縦方向レイアウト
-- 行162-195: 親子タグ分離表示CSS
-- 行375-413: リサイズハンドル、固定オプションCSS
+### 要件1: フィルターUIの配置変更
+**目的**: 現在のUIが詰まって見切れる問題を解決
 
-### content/content.js
-- 行34-37: ドロップダウン高さ定数
-- 行138-185: `getDropdownHeight()`, `saveDropdownHeight()` 関数
-- 行984-1050: `reorderProjectTags()` 関数
-- 行1340-1364: `createTagBadge`に`displayName`, `tooltipText`対応
-- 行1624-1757: `showTagPopover`の`updateUI`（親子分離+D&D）
-- 行1746-1793: `createInlineBadges`（親タグ導出ロジック）
-- 行2444-2520: `showTagDropdown`（async化、リサイズ処理）
-- 行2522-2619: 固定オプションコンテナ
-- 行2870-2898: クリーンアップ、キーボードナビゲーション拡張
+**現在**: `mat-button-toggle-group`の直後に配置
+**変更後**: `project-actions-container`と`all-projects-container`の間に移動
+
+**修正箇所**:
+1. `findFilterTargetElement()` (content.js:2171-2187) - `all-projects-container`を優先検索
+2. `injectFilterUI()` (content.js:3209-3215) - 直前に挿入するロジック追加
+3. CSS (content.css:300-306) - `display: flex`, `margin: 8px 0`
+
+### 要件2: タグドロップダウンの階層表示
+**目的**: 親タグの左に展開/折りたたみボタン（▶/▼）を追加
+
+**ユーザー選択**:
+- 展開状態: storageに保存（次回も保持）
+- 検索時: 全展開でフラット表示
+
+**修正箇所**:
+1. **ストレージ関数追加** (content.js:185以降)
+   - `getExpandedTags()` - 展開中タグ配列を取得
+   - `saveExpandedTags(tags)` - 展開中タグ配列を保存
+   - `toggleTagExpansion(tagName, currentExpanded)` - 状態トグル
+
+2. **CSS追加** (content.css:756以降)
+   - `.nf-tag-expand-btn` - 展開ボタン（16x16px、▶表示）
+   - `.nf-tag-expand-btn.expanded` - 90度回転（下向き）
+   - `.nf-tag-expand-spacer` - 子タグなし用スペーサー
+   - `.has-children::after { content: '' }` - ラベル後の矢印削除
+
+3. **showTagDropdown()修正** (content.js:2632)
+   - 関数開始時に `let expandedTags = await getExpandedTags()` 追加
+
+4. **createTagItem()修正** (content.js:2870-3018)
+   - 引数追加: `createTagItem(tag, depth, isSearchMode)`
+   - 親タグ: 展開ボタン追加（colorIndicatorの前）
+   - 子タグなし: スペーサー追加
+   - 検索モード: 展開ボタン/スペーサーなし
+   - 要素順序: `[展開ボタン/スペーサー] → colorIndicator → checkbox → label → count → deleteBtn`
+
+5. **renderTagList()修正** (content.js:3020-3045)
+   - `expandedTags.includes(tag)`で子タグ表示を制御
+   - 検索時は`isSearchMode=true`でフラット表示
 
 ---
 
-## テスト確認項目
+## 実装順序（推奨）
 
-- [ ] 子タグ`AI/機械学習`から親`AI`が導出されカードに表示
-- [ ] ポップオーバーで親タグ（上段）と子タグ（下段）が分離表示
-- [ ] 親タグをD&Dで並び替え可能
-- [ ] 並び順がカード表示に即座に反映
-- [ ] タグ選択窓が広くなっている（デフォルト350px）
-- [ ] 下辺ドラッグでリサイズ可能（100-600px）
-- [ ] リサイズサイズが次回も保持される
-- [ ] 「ルートに移動」「タグなし」がスクロールしても固定表示
-- [ ] キーボードで固定オプションにもフォーカス可能
+### Phase 1: タグ階層表示（要件2）
+```
+1. ストレージ関数追加 (content.js:185以降)
+2. CSS追加 (content.css:756以降)
+3. showTagDropdown()修正 (content.js:2632)
+4. createTagItem()修正 (content.js:2870)
+5. renderTagList()修正 (content.js:3020)
+```
+
+### Phase 2: フィルターUI配置（要件1）
+```
+6. findFilterTargetElement()修正 (content.js:2171)
+7. injectFilterUI()修正 (content.js:3209)
+8. CSS調整 (content.css:300)
+```
+
+### Phase 3: テスト
+```
+- 展開/折りたたみ動作
+- 展開状態の保存・復元
+- 検索時のフラット表示
+- フィルターUI位置確認
+- 既存機能（D&D、削除、選択）の動作確認
+```
+
+---
+
+## 重要な技術詳細
+
+### showTagDropdownは既にasync
+```javascript
+async function showTagDropdown(button) {  // 行2632
+```
+
+### createTagItemは内部関数
+`showTagDropdown()`内で定義されているため、`expandedTags`変数にクロージャでアクセス可能
+
+### 現在の要素追加順序（行2946-2950）
+```javascript
+item.appendChild(colorIndicator);
+item.appendChild(checkbox);
+item.appendChild(label);
+item.appendChild(countSpan);
+item.appendChild(deleteBtn);
+```
+→ 先頭に展開ボタン/スペーサーを追加
+
+### 展開ボタンのイベント分離
+```javascript
+expandBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();  // タグ選択と分離
+  expandedTags = await toggleTagExpansion(tag, expandedTags);
+  renderTagList(searchInput.value);
+});
+```
 
 ---
 
@@ -104,8 +136,8 @@ NoteFolder/
 │   ├── popup.html
 │   ├── popup.css
 │   └── popup.js
-├── icons/
-├── 実装計画_タグ表示改善.md   # 実装計画（完了）
+├── 実装計画_UI改善v4.md       # 詳細実装計画（今回作成）
+├── 実装計画_タグ表示改善.md   # 前回の実装計画（完了）
 ├── TAKEOVER.md                # この引き継ぎドキュメント
 └── CLAUDE.md                  # プロジェクト指示書
 ```
@@ -121,35 +153,18 @@ NoteFolder/
 ### 実装上の注意
 - **XSS対策**: ユーザー入力は必ず`textContent`で表示
 - **lastErrorチェック**: 全storage操作で`chrome.runtime.lastError`を確認
-- **flex: 1は使用しない**: リサイズ機能と競合するため
-- **heightはJSで直接設定**: `tagListContainer.style.height`
+- **stopPropagation**: 展開ボタンクリックはタグ選択と分離
 
 ---
 
-## 技術詳細
+## 参照ドキュメント
 
-### 親タグ抽出ロジック
-```javascript
-const parentTagNames = [...new Set(
-  project.tags.map(tag => tag.split(HIERARCHY_SEPARATOR)[0])
-)];
-```
-
-### リサイズ処理
-```javascript
-const savedHeight = await getDropdownHeight();
-tagListContainer.style.height = `${savedHeight}px`;
-// mousedown/mousemove/mouseupでリサイズ
-// mouseupで saveDropdownHeight() 呼び出し
-```
-
-### 親タグ並び替え
-```javascript
-await reorderProjectTags(projectId, draggedParent, targetParent);
-// 内部でupdateInlineBadges(projectId)を呼び出し
-```
+| ファイル | 内容 |
+|----------|------|
+| `実装計画_UI改善v4.md` | 詳細実装計画（コード例含む） |
+| `CLAUDE.md` | プロジェクト指示書、禁止操作 |
 
 ---
 
 **最終更新**: 2025-12-31
-**ステータス**: 実装完了・テスト待ち
+**ステータス**: 計画完了・実装待ち
