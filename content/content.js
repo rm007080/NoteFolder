@@ -16,11 +16,97 @@ function isStorageAvailable() {
 }
 
 // ========================================
+// Storage helpers
+// ========================================
+
+/**
+ * chrome.storage.sync.get を Promise 化
+ * @param {Object|null} defaults - 取得キー or null（全件）
+ * @returns {Promise<{ok: boolean, data: Object}>}
+ */
+function storageGet(defaults) {
+  return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      resolve({ ok: false, data: defaults === null ? {} : (defaults || {}) });
+      return;
+    }
+
+    const getArg = defaults === null ? null : defaults;
+    chrome.storage.sync.get(getArg, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage read error:', chrome.runtime.lastError.message);
+        resolve({ ok: false, data: defaults === null ? {} : (defaults || {}) });
+        return;
+      }
+      resolve({ ok: true, data: result });
+    });
+  });
+}
+
+/**
+ * chrome.storage.sync.set を Promise 化
+ * @param {Object} data
+ * @returns {Promise<boolean>}
+ */
+function storageSet(data) {
+  return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      console.warn('Storage not available - extension may need reload');
+      resolve(false);
+      return;
+    }
+    chrome.storage.sync.set(data, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage write error:', chrome.runtime.lastError.message);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+/**
+ * chrome.storage.sync.remove を Promise 化
+ * @param {string|string[]} keys
+ * @returns {Promise<boolean>}
+ */
+function storageRemove(keys) {
+  return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      console.warn('Storage not available - extension may need reload');
+      resolve(false);
+      return;
+    }
+    chrome.storage.sync.remove(keys, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage remove error:', chrome.runtime.lastError.message);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+// ========================================
 // 定数
 // ========================================
 
-// プロジェクトの絵文字アイコンのセレクタ
-const EMOJI_SELECTOR = '[id^="project-"][id$="-emoji"]';
+// NotebookLM DOM セレクタ
+const NOTEBOOKLM_SELECTORS = {
+  projectEmoji: '[id^="project-"][id$="-emoji"]',
+  projectCard: 'mat-card.project-button-card',
+  projectCardContainer: 'project-button',
+  projectTitle: '.project-button-title, .mdc-card__title, [data-testid="project-title"]',
+  projectTitleFallback: '.project-button-title, .mdc-card__title, [data-testid="project-title"], [class*="title"]',
+  allProjectsContainer: '.all-projects-container',
+  projectActionsContainer: '.project-actions-container',
+  projectSectionToggle: 'mat-button-toggle-group.project-section-toggle'
+};
+
+// プロジェクトの絵文字アイコンのセレクタ（互換用）
+const EMOJI_SELECTOR = NOTEBOOKLM_SELECTORS.projectEmoji;
 
 // 処理済みプロジェクトを追跡するSet
 const processedProjects = new Set();
@@ -144,20 +230,11 @@ function getTagDepth(tag) {
  * @returns {Promise<number>} 高さ（px）
  */
 async function getDropdownHeight() {
-  return new Promise((resolve) => {
-    if (!isStorageAvailable()) {
-      resolve(DEFAULT_DROPDOWN_HEIGHT);
-      return;
-    }
-    chrome.storage.sync.get({ dropdownHeight: DEFAULT_DROPDOWN_HEIGHT }, (result) => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage read error:', chrome.runtime.lastError.message);
-        resolve(DEFAULT_DROPDOWN_HEIGHT);
-        return;
-      }
-      resolve(result.dropdownHeight);
-    });
-  });
+  if (!isStorageAvailable()) {
+    return DEFAULT_DROPDOWN_HEIGHT;
+  }
+  const { ok, data } = await storageGet({ dropdownHeight: DEFAULT_DROPDOWN_HEIGHT });
+  return ok ? data.dropdownHeight : DEFAULT_DROPDOWN_HEIGHT;
 }
 
 /**
@@ -166,22 +243,11 @@ async function getDropdownHeight() {
  * @returns {Promise<boolean>}
  */
 async function saveDropdownHeight(height) {
-  return new Promise((resolve) => {
-    if (!isStorageAvailable()) {
-      resolve(false);
-      return;
-    }
-    // 範囲制限
-    const clampedHeight = Math.max(MIN_DROPDOWN_HEIGHT, Math.min(MAX_DROPDOWN_HEIGHT, height));
-    chrome.storage.sync.set({ dropdownHeight: clampedHeight }, () => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage write error:', chrome.runtime.lastError.message);
-        resolve(false);
-        return;
-      }
-      resolve(true);
-    });
-  });
+  if (!isStorageAvailable()) {
+    return false;
+  }
+  const clampedHeight = Math.max(MIN_DROPDOWN_HEIGHT, Math.min(MAX_DROPDOWN_HEIGHT, height));
+  return storageSet({ dropdownHeight: clampedHeight });
 }
 
 // ========================================
@@ -193,20 +259,11 @@ async function saveDropdownHeight(height) {
  * @returns {Promise<string[]>} 展開されているタグ名の配列
  */
 async function getExpandedTags() {
-  return new Promise((resolve) => {
-    if (!isStorageAvailable()) {
-      resolve([]);
-      return;
-    }
-    chrome.storage.sync.get({ expandedTags: [] }, (result) => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage read error:', chrome.runtime.lastError.message);
-        resolve([]);
-        return;
-      }
-      resolve(result.expandedTags);
-    });
-  });
+  if (!isStorageAvailable()) {
+    return [];
+  }
+  const { ok, data } = await storageGet({ expandedTags: [] });
+  return ok ? data.expandedTags : [];
 }
 
 /**
@@ -215,20 +272,10 @@ async function getExpandedTags() {
  * @returns {Promise<boolean>}
  */
 async function saveExpandedTags(tags) {
-  return new Promise((resolve) => {
-    if (!isStorageAvailable()) {
-      resolve(false);
-      return;
-    }
-    chrome.storage.sync.set({ expandedTags: tags }, () => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage write error:', chrome.runtime.lastError.message);
-        resolve(false);
-        return;
-      }
-      resolve(true);
-    });
-  });
+  if (!isStorageAvailable()) {
+    return false;
+  }
+  return storageSet({ expandedTags: tags });
 }
 
 /**
@@ -288,33 +335,23 @@ function loadTagMetaFromItems(items) {
  * @returns {Promise<boolean>}
  */
 async function saveTagMeta(tagName, data) {
-  return new Promise((resolve) => {
-    if (!isStorageAvailable()) {
-      console.warn('Storage not available - extension may need reload');
-      resolve(false);
-      return;
-    }
-    const shardKey = `tagMeta:${getShardKey(tagName)}`;
-    chrome.storage.sync.get({ [shardKey]: {} }, (result) => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage read error:', chrome.runtime.lastError.message);
-        resolve(false);
-        return;
-      }
-      const shard = result[shardKey] || {};
-      shard[tagName] = data;
-      chrome.storage.sync.set({ [shardKey]: shard }, () => {
-        if (chrome.runtime.lastError) {
-          console.error('Storage write error:', chrome.runtime.lastError.message);
-          resolve(false);
-          return;
-        }
-        // キャッシュも更新
-        cache.tagMeta[tagName] = data;
-        resolve(true);
-      });
-    });
-  });
+  if (!isStorageAvailable()) {
+    console.warn('Storage not available - extension may need reload');
+    return false;
+  }
+  const shardKey = `tagMeta:${getShardKey(tagName)}`;
+  const { ok, data: result } = await storageGet({ [shardKey]: {} });
+  if (!ok) {
+    return false;
+  }
+  const shard = result[shardKey] || {};
+  shard[tagName] = data;
+  const saved = await storageSet({ [shardKey]: shard });
+  if (!saved) {
+    return false;
+  }
+  cache.tagMeta[tagName] = data;
+  return true;
 }
 
 /**
@@ -323,28 +360,19 @@ async function saveTagMeta(tagName, data) {
  * @returns {Promise<boolean>}
  */
 async function removeTagMeta(tagName) {
-  return new Promise((resolve) => {
-    const shardKey = `tagMeta:${getShardKey(tagName)}`;
-    chrome.storage.sync.get({ [shardKey]: {} }, (result) => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage read error:', chrome.runtime.lastError.message);
-        resolve(false);
-        return;
-      }
-      const shard = result[shardKey] || {};
-      delete shard[tagName];
-      chrome.storage.sync.set({ [shardKey]: shard }, () => {
-        if (chrome.runtime.lastError) {
-          console.error('Storage write error:', chrome.runtime.lastError.message);
-          resolve(false);
-          return;
-        }
-        // キャッシュも更新
-        delete cache.tagMeta[tagName];
-        resolve(true);
-      });
-    });
-  });
+  const shardKey = `tagMeta:${getShardKey(tagName)}`;
+  const { ok, data: result } = await storageGet({ [shardKey]: {} });
+  if (!ok) {
+    return false;
+  }
+  const shard = result[shardKey] || {};
+  delete shard[tagName];
+  const saved = await storageSet({ [shardKey]: shard });
+  if (!saved) {
+    return false;
+  }
+  delete cache.tagMeta[tagName];
+  return true;
 }
 
 // ========================================
@@ -434,14 +462,7 @@ async function migrateDataIfNeeded(items) {
     // 新しいタグがある場合のみ保存
     if (hasNewTags) {
       for (const [key, value] of Object.entries(tagMetaShards)) {
-        await new Promise((resolve) => {
-          chrome.storage.sync.set({ [key]: value }, () => {
-            if (chrome.runtime.lastError) {
-              console.error('Migration error:', chrome.runtime.lastError.message);
-            }
-            resolve();
-          });
-        });
+        await storageSet({ [key]: value });
       }
     }
   }
@@ -455,39 +476,17 @@ async function migrateDataIfNeeded(items) {
     }
   }
   if (Object.keys(projectUpdates).length > 0) {
-    await new Promise((resolve) => {
-      chrome.storage.sync.set(projectUpdates, () => {
-        if (chrome.runtime.lastError) {
-          console.error('Migration error:', chrome.runtime.lastError.message);
-        }
-        resolve();
-      });
-    });
+    await storageSet(projectUpdates);
   }
 
   // Step 3: マイグレーション完了フラグ
-  await new Promise((resolve) => {
-    chrome.storage.sync.set({ _migrationVersion: CURRENT_MIGRATION_VERSION }, () => {
-      if (chrome.runtime.lastError) {
-        console.error('Migration error:', chrome.runtime.lastError.message);
-      }
-      resolve();
-    });
-  });
+  await storageSet({ _migrationVersion: CURRENT_MIGRATION_VERSION });
 
   cache.migrationDone = true;
 
   // 更新後のデータを再読み込み
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(null, (newItems) => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage read error:', chrome.runtime.lastError.message);
-        resolve(items);
-        return;
-      }
-      resolve(newItems);
-    });
-  });
+  const { ok, data } = await storageGet(null);
+  return ok ? data : items;
 }
 
 // ========================================
@@ -524,34 +523,32 @@ function initCache() {
       return;
     }
 
-    chrome.storage.sync.get(null, async (items) => {
-      if (chrome.runtime.lastError) {
-        console.error('Cache init error:', chrome.runtime.lastError.message);
-        cache.initialized = true;
-        resolve();
-        return;
-      }
-
-      // マイグレーションを実行
-      items = await migrateDataIfNeeded(items);
-
-      // allTagsをキャッシュ（後方互換性）
-      cache.allTags = items.allTags || [];
-
-      // tagMetaをキャッシュ
-      cache.tagMeta = loadTagMetaFromItems(items);
-
-      // プロジェクトデータをキャッシュ
-      cache.projects.clear();
-      for (const [key, value] of Object.entries(items)) {
-        if (key.startsWith('project:')) {
-          cache.projects.set(value.id, value);
-        }
-      }
-
+    const { ok, data } = await storageGet(null);
+    if (!ok) {
       cache.initialized = true;
       resolve();
-    });
+      return;
+    }
+
+    // マイグレーションを実行
+    const items = await migrateDataIfNeeded(data);
+
+    // allTagsをキャッシュ（後方互換性）
+    cache.allTags = items.allTags || [];
+
+    // tagMetaをキャッシュ
+    cache.tagMeta = loadTagMetaFromItems(items);
+
+    // プロジェクトデータをキャッシュ
+    cache.projects.clear();
+    for (const [key, value] of Object.entries(items)) {
+      if (key.startsWith('project:')) {
+        cache.projects.set(value.id, value);
+      }
+    }
+
+    cache.initialized = true;
+    resolve();
   });
 
   return cacheReadyPromise;
@@ -569,6 +566,70 @@ function ensureCacheReady() {
     return cacheReadyPromise;
   }
   return initCache();
+}
+
+/**
+ * ストレージから最新データを読み込み、キャッシュを更新
+ * @returns {Promise<boolean>}
+ */
+async function refreshCacheFromStorage() {
+  if (!isStorageAvailable()) {
+    return false;
+  }
+
+  const { ok, data } = await storageGet(null);
+  if (!ok) {
+    console.error('Cache refresh error: storage get failed');
+    return false;
+  }
+
+  // 必要であればマイグレーションを実行
+  const items = await migrateDataIfNeeded(data);
+
+  // allTagsをキャッシュ（後方互換性）
+  cache.allTags = items.allTags || [];
+
+  // tagMetaをキャッシュ
+  cache.tagMeta = loadTagMetaFromItems(items);
+
+  // プロジェクトデータをキャッシュ
+  cache.projects.clear();
+  for (const [key, value] of Object.entries(items)) {
+    if (key.startsWith('project:')) {
+      cache.projects.set(value.id, value);
+    }
+  }
+
+  cache.initialized = true;
+  return true;
+}
+
+/**
+ * ストレージを同期してUIを更新
+ * @returns {Promise<boolean>}
+ */
+async function syncCacheAndRefreshUI() {
+  await ensureCacheReady();
+  const refreshed = await refreshCacheFromStorage();
+  if (!refreshed) {
+    return false;
+  }
+
+  if (isProjectListPage()) {
+    // 選択中フィルターをクリーンアップ
+    const availableTags = new Set(getAllTagNames());
+    const cleaned = selectedFilterTags.filter(tag => availableTags.has(tag));
+    if (cleaned.length !== selectedFilterTags.length) {
+      selectedFilterTags = cleaned;
+    }
+
+    applyFilters();
+    updateFilterUI();
+    refreshVisibleProjectUI();
+  }
+
+  triggerUIRefresh();
+  return true;
 }
 
 /**
@@ -624,14 +685,31 @@ function setupStorageListener() {
   chrome.storage.onChanged.addListener((changes, areaName) => {
     if (areaName !== 'sync') return;
 
-    for (const [key, { newValue }] of Object.entries(changes)) {
+    let tagsChanged = false;
+    let projectsChanged = false;
+
+    for (const [key, { newValue, oldValue }] of Object.entries(changes)) {
       if (key === 'allTags') {
         cache.allTags = newValue || [];
+        tagsChanged = true;
       } else if (key.startsWith('tagMeta:')) {
-        // tagMetaシャードの更新
-        if (newValue) {
+        // tagMetaシャードの更新（古いキーを削除してから置き換え）
+        if (oldValue && typeof oldValue === 'object') {
+          for (const tagName of Object.keys(oldValue)) {
+            delete cache.tagMeta[tagName];
+          }
+        } else {
+          const shardKey = key.slice('tagMeta:'.length);
+          for (const tagName of Object.keys(cache.tagMeta)) {
+            if (getShardKey(tagName) === shardKey) {
+              delete cache.tagMeta[tagName];
+            }
+          }
+        }
+        if (newValue && typeof newValue === 'object') {
           Object.assign(cache.tagMeta, newValue);
         }
+        tagsChanged = true;
       } else if (key.startsWith('project:')) {
         if (newValue) {
           cache.projects.set(newValue.id, newValue);
@@ -640,7 +718,33 @@ function setupStorageListener() {
           const projectId = key.replace('project:', '');
           cache.projects.delete(projectId);
         }
+        projectsChanged = true;
       }
+    }
+
+    // タグ削除時に選択中フィルターをクリーンアップ
+    let filtersReapplied = false;
+    if (tagsChanged) {
+      const availableTags = new Set(getAllTagNames());
+      const cleaned = selectedFilterTags.filter(tag => availableTags.has(tag));
+      if (cleaned.length !== selectedFilterTags.length) {
+        selectedFilterTags = cleaned;
+        filterProjectsByTags(selectedFilterTags);
+        filtersReapplied = true;
+      }
+    }
+
+    if (!filtersReapplied && (tagsChanged || projectsChanged)) {
+      applyFilters();
+    }
+
+    if (tagsChanged || projectsChanged) {
+      updateFilterUI();
+      triggerUIRefresh();
+    }
+
+    if (projectsChanged) {
+      refreshVisibleProjectUI();
     }
   });
 }
@@ -658,12 +762,10 @@ function getProjectNameFromDOM(projectId) {
   const emojiEl = document.getElementById(`project-${projectId}-emoji`);
   if (!emojiEl) return '';
 
-  const card = emojiEl.closest('mat-card.project-button-card');
+  const card = emojiEl.closest(NOTEBOOKLM_SELECTORS.projectCard);
   if (!card) return '';
 
-  const titleEl = card.querySelector(
-    '.project-button-title, .mdc-card__title, [data-testid="project-title"]'
-  );
+  const titleEl = card.querySelector(NOTEBOOKLM_SELECTORS.projectTitle);
   return titleEl?.textContent?.trim() || '';
 }
 
@@ -677,12 +779,10 @@ function syncProjectNameIfChanged(projectId) {
 
   if (cachedProject && cachedProject.name !== currentName && currentName) {
     cachedProject.name = currentName;
-    chrome.storage.sync.set({ [`project:${projectId}`]: cachedProject }, () => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage write error:', chrome.runtime.lastError.message);
+    storageSet({ [`project:${projectId}`]: cachedProject }).then((ok) => {
+      if (!ok) {
         return;
       }
-      // キャッシュも更新
       cache.projects.set(projectId, cachedProject);
     });
   }
@@ -994,22 +1094,13 @@ async function addTagToProject(projectId, newTag) {
   allTags = normalizeAllTags(allTags);
 
   // 保存
-  return new Promise((resolve) => {
-    chrome.storage.sync.set(
-      { [`project:${projectId}`]: project, allTags: allTags },
-      () => {
-        if (chrome.runtime.lastError) {
-          console.error('Storage write error:', chrome.runtime.lastError.message);
-          showToast('タグの追加に失敗しました');
-          resolve(false);
-          return;
-        }
-        // SET成功後にキャッシュを更新
-        updateCache(projectId, project, allTags);
-        resolve(true);
-      }
-    );
-  });
+  const saved = await storageSet({ [`project:${projectId}`]: project, allTags: allTags });
+  if (!saved) {
+    showToast('タグの追加に失敗しました');
+    return false;
+  }
+  updateCache(projectId, project, allTags);
+  return true;
 }
 
 /**
@@ -1018,36 +1109,24 @@ async function addTagToProject(projectId, newTag) {
  * @param {string} tagToRemove
  * @returns {Promise<boolean>}
  */
-function removeTagFromProject(projectId, tagToRemove) {
-  return new Promise((resolve) => {
-    // キャッシュからプロジェクトを取得
-    const cachedProject = getCachedProject(projectId);
-    if (!cachedProject) {
-      resolve(false);
-      return;
-    }
+async function removeTagFromProject(projectId, tagToRemove) {
+  const cachedProject = getCachedProject(projectId);
+  if (!cachedProject) {
+    return false;
+  }
 
-    // プロジェクトデータをコピーしてタグを削除
-    const project = { ...cachedProject };
-    project.tags = project.tags.filter(tag => tag !== tagToRemove);
-    project.updatedAt = Date.now();
+  const project = { ...cachedProject };
+  project.tags = project.tags.filter(tag => tag !== tagToRemove);
+  project.updatedAt = Date.now();
 
-    // 保存
-    chrome.storage.sync.set(
-      { [`project:${projectId}`]: project },
-      () => {
-        if (chrome.runtime.lastError) {
-          console.error('Storage write error:', chrome.runtime.lastError.message);
-          showToast('タグの削除に失敗しました');
-          resolve(false);
-          return;
-        }
-        // SET成功後にキャッシュを更新
-        updateCache(projectId, project, null);
-        resolve(true);
-      }
-    );
-  });
+  const saved = await storageSet({ [`project:${projectId}`]: project });
+  if (!saved) {
+    showToast('タグの削除に失敗しました');
+    return false;
+  }
+
+  updateCache(projectId, project, null);
+  return true;
 }
 
 /**
@@ -1099,23 +1178,13 @@ async function reorderProjectTags(projectId, draggedParent, targetParent) {
   project.tags = newTags;
   project.updatedAt = Date.now();
 
-  return new Promise((resolve) => {
-    chrome.storage.sync.set(
-      { [`project:${projectId}`]: project },
-      () => {
-        if (chrome.runtime.lastError) {
-          console.error('Storage write error:', chrome.runtime.lastError.message);
-          resolve(false);
-          return;
-        }
-        // キャッシュを更新
-        updateCache(projectId, project, null);
-        // インラインバッジを更新
-        updateInlineBadges(projectId);
-        resolve(true);
-      }
-    );
-  });
+  const saved = await storageSet({ [`project:${projectId}`]: project });
+  if (!saved) {
+    return false;
+  }
+  updateCache(projectId, project, null);
+  refreshProjectUI(projectId);
+  return true;
 }
 
 /**
@@ -1171,23 +1240,13 @@ async function reorderProjectTagsAtIndex(projectId, draggedParent, targetIndex) 
   project.tags = newTags;
   project.updatedAt = Date.now();
 
-  return new Promise((resolve) => {
-    chrome.storage.sync.set(
-      { [`project:${projectId}`]: project },
-      () => {
-        if (chrome.runtime.lastError) {
-          console.error('Storage write error:', chrome.runtime.lastError.message);
-          resolve(false);
-          return;
-        }
-        // キャッシュを更新
-        updateCache(projectId, project, null);
-        // インラインバッジを更新
-        updateInlineBadges(projectId);
-        resolve(true);
-      }
-    );
-  });
+  const saved = await storageSet({ [`project:${projectId}`]: project });
+  if (!saved) {
+    return false;
+  }
+  updateCache(projectId, project, null);
+  refreshProjectUI(projectId);
+  return true;
 }
 
 /**
@@ -1250,29 +1309,82 @@ async function removeTagFromAllProjects(tagToRemove, skipConfirm = false) {
   };
 
   // 保存
-  return new Promise((resolve) => {
-    chrome.storage.sync.set(updateData, () => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage write error:', chrome.runtime.lastError.message);
-        showToast('タグの削除に失敗しました');
-        resolve(false);
-        return;
-      }
+  const saved = await storageSet(updateData);
+  if (!saved) {
+    showToast('タグの削除に失敗しました');
+    return false;
+  }
 
-      // キャッシュを更新
-      cache.allTags = newAllTags;
-      for (const [key, value] of Object.entries(updatedProjects)) {
-        const projectId = key.replace('project:', '');
-        cache.projects.set(projectId, value);
-      }
+  cache.allTags = newAllTags;
+  for (const [key, value] of Object.entries(updatedProjects)) {
+    const projectId = key.replace('project:', '');
+    cache.projects.set(projectId, value);
+  }
 
-      const message = childTags.length > 0
-        ? `タグ「${tagToRemove}」と子タグ（${childTags.length}個）を削除しました`
-        : `タグ「${tagToRemove}」を削除しました`;
-      showToast(message);
-      resolve(true);
-    });
-  });
+  const message = childTags.length > 0
+    ? `タグ「${tagToRemove}」と子タグ（${childTags.length}個）を削除しました`
+    : `タグ「${tagToRemove}」を削除しました`;
+  showToast(message);
+  return true;
+}
+
+/**
+ * タグ配列内のタグを置換（重複はそのまま）
+ * @param {string[]} tags
+ * @param {string} oldTag
+ * @param {string} newTag
+ * @returns {string[]|null} 変更がない場合はnull
+ */
+function replaceTagInTags(tags, oldTag, newTag) {
+  if (!tags.includes(oldTag)) return null;
+  return tags.map(tag => (tag === oldTag ? newTag : tag));
+}
+
+/**
+ * タグ配列内でsourceTagをtargetTagに統合（重複排除）
+ * @param {string[]} tags
+ * @param {string} sourceTag
+ * @param {string} targetTag
+ * @returns {string[]|null} 変更がない場合はnull
+ */
+function mergeTagInTags(tags, sourceTag, targetTag) {
+  if (!tags.includes(sourceTag)) return null;
+  let updatedTags = [...tags];
+  const sourceIndex = updatedTags.indexOf(sourceTag);
+
+  if (updatedTags.includes(targetTag)) {
+    updatedTags.splice(sourceIndex, 1);
+  } else {
+    updatedTags[sourceIndex] = targetTag;
+  }
+
+  return [...new Set(updatedTags)];
+}
+
+/**
+ * 全プロジェクトに対してタグ配列を更新し、更新マップを返す
+ * @param {function(string[], string, Object): (string[]|null)} updateTagsFn
+ * @returns {Object} storage用の更新マップ
+ */
+function updateProjectsByTags(updateTagsFn) {
+  const projectUpdates = {};
+
+  for (const [projectId, project] of cache.projects) {
+    if (!project.tags || project.tags.length === 0) {
+      continue;
+    }
+
+    const updatedTags = updateTagsFn(project.tags, projectId, project);
+    if (!updatedTags) {
+      continue;
+    }
+
+    const updatedProject = { ...project, tags: updatedTags, updatedAt: Date.now() };
+    cache.projects.set(projectId, updatedProject);
+    projectUpdates[`project:${projectId}`] = updatedProject;
+  }
+
+  return projectUpdates;
 }
 
 /**
@@ -1288,30 +1400,10 @@ async function mergeTagsInAllProjects(sourceTag, targetTag) {
   const allTags = getAllTagNames();
   const childTags = allTags.filter(t => t.startsWith(sourceTag + HIERARCHY_SEPARATOR));
 
-  const projectUpdates = {};
-  const metaToRemove = [];
-
-  // 1. 全プロジェクトでsourceTagをtargetTagに置換
-  for (const [projectId, project] of cache.projects) {
-    if (project.tags && project.tags.includes(sourceTag)) {
-      let updatedTags = [...project.tags];
-      const sourceIndex = updatedTags.indexOf(sourceTag);
-
-      if (updatedTags.includes(targetTag)) {
-        // targetTagが既にある場合はsourceTagを削除
-        updatedTags.splice(sourceIndex, 1);
-      } else {
-        // targetTagがない場合はsourceTagをtargetTagに置換
-        updatedTags[sourceIndex] = targetTag;
-      }
-
-      // 重複除去（Set化）
-      updatedTags = [...new Set(updatedTags)];
-
-      project.tags = updatedTags;
-      projectUpdates[`project:${projectId}`] = { ...project, updatedAt: Date.now() };
-    }
-  }
+  // 1. 全プロジェクトでsourceTagをtargetTagに統合
+  const projectUpdates = updateProjectsByTags((tags) =>
+    mergeTagInTags(tags, sourceTag, targetTag)
+  );
 
   // 2. tagMeta欠損補完（targetが無色の場合のみsourceの色を引き継ぐ）
   const sourceMeta = cache.tagMeta[sourceTag];
@@ -1320,9 +1412,8 @@ async function mergeTagsInAllProjects(sourceTag, targetTag) {
     await saveTagMeta(targetTag, { color: sourceMeta.color });
   }
 
-  // 3. sourceTagのメタデータを削除対象に追加
-  metaToRemove.push(`tagMeta:${sourceTag}`);
-  delete cache.tagMeta[sourceTag];
+  // 3. sourceTagのメタデータを削除
+  await removeTagMeta(sourceTag);
 
   // 4. sourceTagの子タグも再帰的に処理（スナップショットを使用）
   for (const childTag of childTags) {
@@ -1339,23 +1430,11 @@ async function mergeTagsInAllProjects(sourceTag, targetTag) {
   }
 
   // 5. ストレージに一括保存（クォータ対策）
-  if (Object.keys(projectUpdates).length > 0 && isStorageAvailable()) {
-    await new Promise((resolve) => {
-      chrome.storage.sync.set(projectUpdates, () => {
-        if (chrome.runtime.lastError) {
-          console.error('Tag merge error:', chrome.runtime.lastError.message);
-        }
-        resolve();
-      });
-    });
+  if (Object.keys(projectUpdates).length > 0) {
+    await storageSet(projectUpdates);
   }
 
-  // 6. メタデータの削除
-  if (metaToRemove.length > 0 && isStorageAvailable()) {
-    await new Promise(resolve => chrome.storage.sync.remove(metaToRemove, resolve));
-  }
-
-  // 7. フィルター状態を更新（sourceをtargetに置換）
+  // 6. フィルター状態を更新（sourceをtargetに置換）
   if (selectedFilterTags.includes(sourceTag)) {
     const idx = selectedFilterTags.indexOf(sourceTag);
     if (!selectedFilterTags.includes(targetTag)) {
@@ -1447,14 +1526,9 @@ async function renameTagInAllProjects(oldTag, newTag) {
   await removeTagMeta(oldTag);
 
   // 2. 全プロジェクトのタグ配列を更新
-  const projectUpdates = {};
-  for (const [projectId, project] of cache.projects) {
-    if (project.tags && project.tags.includes(oldTag)) {
-      const updatedTags = project.tags.map(t => t === oldTag ? newTag : t);
-      project.tags = updatedTags;
-      projectUpdates[`project:${projectId}`] = { ...project, updatedAt: Date.now() };
-    }
-  }
+  const projectUpdates = updateProjectsByTags((tags) =>
+    replaceTagInTags(tags, oldTag, newTag)
+  );
 
   // 3. allTags配列を更新
   if (cache.allTags) {
@@ -1469,14 +1543,7 @@ async function renameTagInAllProjects(oldTag, newTag) {
     updateData.allTags = cache.allTags;
   }
 
-  await new Promise((resolve) => {
-    chrome.storage.sync.set(updateData, () => {
-      if (chrome.runtime.lastError) {
-        console.error('Tag rename error:', chrome.runtime.lastError.message);
-      }
-      resolve();
-    });
-  });
+  await storageSet(updateData);
 }
 
 // ========================================
@@ -1504,27 +1571,19 @@ async function togglePinProject(projectId) {
   projectData.pinned = !projectData.pinned;
   projectData.updatedAt = Date.now();
 
-  return new Promise((resolve) => {
-    chrome.storage.sync.set({ [`project:${projectId}`]: projectData }, () => {
-      if (chrome.runtime.lastError) {
-        console.error('Storage write error:', chrome.runtime.lastError.message);
-        showToast('ピン留めの変更に失敗しました');
-        resolve(false);
-        return;
-      }
+  const saved = await storageSet({ [`project:${projectId}`]: projectData });
+  if (!saved) {
+    showToast('ピン留めの変更に失敗しました');
+    return false;
+  }
 
-      // キャッシュを更新
-      cache.projects.set(projectId, projectData);
+  cache.projects.set(projectId, projectData);
+  updatePinIconState(projectId);
+  sortProjects(currentSortType);
 
-      // UI更新
-      updatePinIconState(projectId);
-      sortProjects(currentSortType);
-
-      const message = projectData.pinned ? 'ピン留めしました' : 'ピン留めを解除しました';
-      showToast(message);
-      resolve(true);
-    });
-  });
+  const message = projectData.pinned ? 'ピン留めしました' : 'ピン留めを解除しました';
+  showToast(message);
+  return true;
 }
 
 /**
@@ -1939,7 +1998,7 @@ function showTagPopover(targetElement, projectId) {
               await removeTagFromProject(projectId, tag);
             }
             updateUI();
-            updateFolderIconState(projectId);
+            refreshProjectUI(projectId);
           }, {
             showColorPicker: true,
             onColorChange: () => {
@@ -2008,10 +2067,7 @@ function showTagPopover(targetElement, projectId) {
               const success = await moveTagToParent(dragged, parentName);
               if (success) {
                 updateUI();
-                // インラインバッジも更新
-                for (const [projId] of cache.projects) {
-                  updateInlineBadges(projId);
-                }
+                refreshVisibleProjectUI();
               }
             }
           });
@@ -2046,7 +2102,7 @@ function showTagPopover(targetElement, projectId) {
             const success = await removeTagFromProject(projectId, tag);
             if (success) {
               updateUI();
-              updateFolderIconState(projectId);
+              refreshProjectUI(projectId);
             }
           }, {
             showColorPicker: true,
@@ -2126,7 +2182,7 @@ function showTagPopover(targetElement, projectId) {
             suggestionsList.innerHTML = '';
             suggestionIndex = -1;
             updateUI();
-            updateFolderIconState(projectId);
+            refreshProjectUI(projectId);
           }
         });
         suggestionsList.appendChild(item);
@@ -2147,7 +2203,7 @@ function showTagPopover(targetElement, projectId) {
         suggestionsList.innerHTML = '';
         suggestionIndex = -1;
         updateUI();
-        updateFolderIconState(projectId);
+        refreshProjectUI(projectId);
       }
     };
 
@@ -2162,7 +2218,7 @@ function showTagPopover(targetElement, projectId) {
           suggestionsList.innerHTML = '';
           suggestionIndex = -1;
           updateUI();
-          updateFolderIconState(projectId);
+          refreshProjectUI(projectId);
         }
         return true;
       }
@@ -2202,7 +2258,11 @@ function showTagPopover(targetElement, projectId) {
     };
   };
 
-  updateUI();
+  const refreshAndUpdate = async () => {
+    await syncCacheAndRefreshUI();
+    updateUI();
+  };
+  refreshAndUpdate();
   // グローバルUI更新コールバックを登録
   uiUpdateCallbacks.popover = updateUI;
   input.focus();
@@ -2217,6 +2277,14 @@ function showTagPopover(targetElement, projectId) {
   setTimeout(() => {
     document.addEventListener('click', handleClickOutside);
   }, 0);
+}
+
+/**
+ * プロジェクトのUI更新入口
+ * @param {string} projectId
+ */
+function refreshProjectUI(projectId) {
+  updateFolderIconState(projectId);
 }
 
 /**
@@ -2239,6 +2307,19 @@ function updateFolderIconState(projectId) {
 
   // インラインバッジを更新
   updateInlineBadges(projectId);
+}
+
+/**
+ * 表示中プロジェクトのUIをまとめて更新
+ */
+function refreshVisibleProjectUI() {
+  const visibleIcons = document.querySelectorAll('.nf-folder-icon[data-project-id]');
+  visibleIcons.forEach(icon => {
+    const projectId = icon.getAttribute('data-project-id');
+    if (projectId) {
+      refreshProjectUI(projectId);
+    }
+  });
 }
 
 // ========================================
@@ -2320,16 +2401,10 @@ function updateInlineBadges(projectId) {
 
 /**
  * 表示中の全プロジェクトのインラインバッジを更新
- * パフォーマンス: cache.projects全体ではなく、DOM上に存在するもののみ対象
+ * フォルダアイコン状態も同期
  */
 function updateAllInlineBadges() {
-  const visibleIcons = document.querySelectorAll('.nf-folder-icon[data-project-id]');
-  visibleIcons.forEach(icon => {
-    const projectId = icon.getAttribute('data-project-id');
-    if (projectId) {
-      updateInlineBadges(projectId);
-    }
-  });
+  refreshVisibleProjectUI();
 }
 
 // ========================================
@@ -2451,7 +2526,7 @@ function injectFolderIcon(emojiElement) {
   }
 
   // フォルダアイコンの状態を更新
-  updateFolderIconState(projectId);
+  refreshProjectUI(projectId);
 }
 
 /**
@@ -2500,15 +2575,15 @@ let originalCardOrder = [];
  */
 function findFilterTargetElement() {
   // 新: all-projects-containerを優先検索
-  const allProjectsContainer = document.querySelector('.all-projects-container');
+  const allProjectsContainer = document.querySelector(NOTEBOOKLM_SELECTORS.allProjectsContainer);
   if (allProjectsContainer) return allProjectsContainer;
 
   // フォールバック: project-actions-container
-  const projectActionsContainer = document.querySelector('.project-actions-container');
+  const projectActionsContainer = document.querySelector(NOTEBOOKLM_SELECTORS.projectActionsContainer);
   if (projectActionsContainer) return projectActionsContainer;
 
   // フォールバック: mat-button-toggle-group（タブバー）
-  const toggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
+  const toggleGroup = document.querySelector(NOTEBOOKLM_SELECTORS.projectSectionToggle);
   if (toggleGroup) return toggleGroup;
 
   // フォールバック: テキスト検索（既存ロジック維持）
@@ -2528,7 +2603,7 @@ function findFilterTargetElement() {
  */
 function getProjectCards() {
   // mat-cardクラスを持つプロジェクトカードを検索
-  return document.querySelectorAll('mat-card.project-button-card');
+  return document.querySelectorAll(NOTEBOOKLM_SELECTORS.projectCard);
 }
 
 /**
@@ -2577,7 +2652,7 @@ function applyFilters() {
   // フィルターが空なら全表示
   if (currentFilters.length === 0) {
     cards.forEach(card => {
-      const gridItem = card.closest('project-button') || card;
+      const gridItem = card.closest(NOTEBOOKLM_SELECTORS.projectCardContainer) || card;
       gridItem.style.display = '';
     });
     sortProjects(currentSortType);
@@ -2587,7 +2662,7 @@ function applyFilters() {
   cards.forEach(card => {
     const projectId = extractProjectIdFromCard(card);
     const project = getCachedProject(projectId);
-    const gridItem = card.closest('project-button') || card;
+    const gridItem = card.closest(NOTEBOOKLM_SELECTORS.projectCardContainer) || card;
 
     // 全てのフィルター条件を満たすかチェック
     const visible = currentFilters.every(filter => {
@@ -2675,7 +2750,7 @@ function filterProjectsByTags(tags) {
  */
 function getProjectName(card) {
   // プロジェクト名を含む要素を探す
-  const titleEl = card.querySelector('.project-button-title, .mdc-card__title, [class*="title"]');
+  const titleEl = card.querySelector(NOTEBOOKLM_SELECTORS.projectTitleFallback);
   if (titleEl) {
     return titleEl.textContent.trim();
   }
@@ -2730,7 +2805,7 @@ function sortProjects(sortType) {
 
   // CSS orderプロパティで順序を制御（project-button要素に適用）
   cardsWithData.forEach((item, index) => {
-    const gridItem = item.card.closest('project-button') || item.card;
+    const gridItem = item.card.closest(NOTEBOOKLM_SELECTORS.projectCardContainer) || item.card;
     gridItem.style.order = index;
   });
 }
@@ -2975,6 +3050,8 @@ async function showTagDropdown(button) {
   dropdown.style.display = 'flex';
   dropdown.style.flexDirection = 'column';
 
+  await syncCacheAndRefreshUI();
+
   // キャッシュからタグを取得
   const allTags = getCachedAllTags();
 
@@ -3184,9 +3261,7 @@ async function showTagDropdown(button) {
       const success = await moveTagToParent(draggingTag, null);
       if (success) {
         renderTagList(searchInput.value);
-        for (const [projectId] of cache.projects) {
-          updateInlineBadges(projectId);
-        }
+        refreshVisibleProjectUI();
         triggerUIRefresh();
       }
     }
@@ -3347,9 +3422,7 @@ async function showTagDropdown(button) {
           updateFilterUI();
           filterProjectsByTags(selectedFilterTags);
           renderTagList(searchInput.value);
-          for (const [projectId] of cache.projects) {
-            updateFolderIconState(projectId);
-          }
+          refreshVisibleProjectUI();
           // ポップオーバーも更新
           triggerUIRefresh();
         }
@@ -3422,10 +3495,7 @@ async function showTagDropdown(button) {
           const success = await moveTagToParent(draggingTag, tag);
           if (success) {
             renderTagList(searchInput.value);
-            // インラインバッジも更新
-            for (const [projectId] of cache.projects) {
-              updateInlineBadges(projectId);
-            }
+            refreshVisibleProjectUI();
             // ポップオーバーも更新
             triggerUIRefresh();
           }
@@ -3617,10 +3687,10 @@ function injectFilterUI() {
   filterContainer.appendChild(selectedContainer);
 
   // 挿入位置の決定
-  if (targetElement.classList.contains('all-projects-container')) {
+  if (targetElement.matches(NOTEBOOKLM_SELECTORS.allProjectsContainer)) {
     // all-projects-containerの場合は直前に挿入
     targetElement.parentNode.insertBefore(filterContainer, targetElement);
-  } else if (targetElement.tagName.toLowerCase() === 'mat-button-toggle-group') {
+  } else if (targetElement.matches(NOTEBOOKLM_SELECTORS.projectSectionToggle)) {
     // mat-button-toggle-groupの場合は直後に挿入
     targetElement.parentNode.insertBefore(filterContainer, targetElement.nextSibling);
   } else {
@@ -3676,7 +3746,7 @@ function observeProjectList() {
  */
 function setupSectionToggleListener() {
   // mat-button-toggle-groupを監視
-  const toggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
+  const toggleGroup = document.querySelector(NOTEBOOKLM_SELECTORS.projectSectionToggle);
   if (!toggleGroup) {
     // 見つからない場合は遅延して再試行
     setTimeout(setupSectionToggleListener, 1000);
@@ -3696,10 +3766,7 @@ function setupSectionToggleListener() {
     setTimeout(() => {
       saveOriginalCardOrder(true);  // 強制更新
       injectAllFolderIcons();
-      // フォルダアイコンの状態を更新
-      for (const [projectId] of cache.projects) {
-        updateFolderIconState(projectId);
-      }
+      refreshVisibleProjectUI();
       applyFilters();  // フィルター再適用
     }, 300);
 
@@ -3707,9 +3774,7 @@ function setupSectionToggleListener() {
     setTimeout(() => {
       saveOriginalCardOrder(true);  // 強制更新
       injectAllFolderIcons();
-      for (const [projectId] of cache.projects) {
-        updateFolderIconState(projectId);
-      }
+      refreshVisibleProjectUI();
       applyFilters();  // フィルター再適用
     }, 800);
   }, { capture: true });
@@ -3762,9 +3827,7 @@ function setupSPANavigationListener() {
         injectFilterUI();
         saveOriginalCardOrder();
         setupSectionToggleListener(); // セクションタブリスナーも再設定
-        for (const [projectId] of cache.projects) {
-          updateFolderIconState(projectId);
-        }
+        refreshVisibleProjectUI();
       } else if (!existingFilterUI && !targetElement && attempt < maxAttempts) {
         // ターゲット要素がまだない → リトライ
         setTimeout(() => tryReinject(attempt + 1, maxAttempts), 300);
@@ -3781,7 +3844,7 @@ function setupSPANavigationListener() {
     for (const mutation of mutations) {
       if (mutation.type === 'childList') {
         // toggleGroupが再生成された場合、リスナーを再設定
-        const newToggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
+        const newToggleGroup = document.querySelector(NOTEBOOKLM_SELECTORS.projectSectionToggle);
         if (newToggleGroup && !newToggleGroup.dataset.nfListenerAttached) {
           setupSectionToggleListener();
         }
@@ -3793,6 +3856,22 @@ function setupSPANavigationListener() {
   toggleGroupObserver.observe(document.body, {
     childList: true,
     subtree: true
+  });
+}
+
+/**
+ * タブ復帰時にストレージ同期を行う
+ */
+function setupFocusSync() {
+  const handleFocus = () => {
+    syncCacheAndRefreshUI();
+  };
+
+  window.addEventListener('focus', handleFocus);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      syncCacheAndRefreshUI();
+    }
   });
 }
 
@@ -3838,6 +3917,9 @@ function initNoteFolder() {
 
     // SPAナビゲーション監視をセットアップ
     setupSPANavigationListener();
+
+    // タブ復帰時の同期をセットアップ
+    setupFocusSync();
   });
 }
 
