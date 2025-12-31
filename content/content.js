@@ -1959,12 +1959,15 @@ function showTagPopover(targetElement, projectId) {
             e.dataTransfer.setData('text/plain', parentName);
             e.dataTransfer.setData('application/x-nf-tag', parentName);  // 統一MIME追加
             e.dataTransfer.effectAllowed = 'move';
+            // ポップオーバー要素に属性を設定（ドロップダウンと同じパターン）
+            popover.setAttribute('data-dragging-tag', parentName);
           });
 
           badge.addEventListener('dragend', () => {
             badge.classList.remove('nf-dragging');
             parentSection.classList.remove('nf-dragging-active');
             draggedParent = null;
+            popover.removeAttribute('data-dragging-tag');
             // 全てのドロップターゲットスタイルをクリア
             parentSection.querySelectorAll('.nf-drop-active, .nf-parent-drop-target').forEach(el => {
               el.classList.remove('nf-drop-active', 'nf-parent-drop-target');
@@ -1974,10 +1977,12 @@ function showTagPopover(targetElement, projectId) {
           // バッジ上へのドロップ = 親子関係を設定（全プロジェクトに影響）
           badge.addEventListener('dragover', (e) => {
             e.preventDefault();
-            // 統一MIMEで判定（親/子両方対応）
-            if (e.dataTransfer.types.includes('application/x-nf-tag')) {
-              // 自分自身以外ならドロップ可能
-              e.dataTransfer.dropEffect = 'link'; // 親子関係は「リンク」
+            const draggingTag = popover.getAttribute('data-dragging-tag');
+            // 自分自身や自分の子孫にはドロップ不可
+            if (draggingTag &&
+                parentName !== draggingTag &&
+                !parentName.startsWith(draggingTag + HIERARCHY_SEPARATOR)) {
+              e.dataTransfer.dropEffect = 'move';  // effectAllowedと整合
               badge.classList.add('nf-parent-drop-target');
             }
           });
@@ -1990,6 +1995,7 @@ function showTagPopover(targetElement, projectId) {
             e.preventDefault();
             e.stopPropagation();
             badge.classList.remove('nf-parent-drop-target');
+            popover.removeAttribute('data-dragging-tag');  // dragend未発火時の安全策
 
             const dragged = e.dataTransfer.getData('text/plain');
             if (dragged && dragged !== parentName) {
@@ -2061,10 +2067,13 @@ function showTagPopover(targetElement, projectId) {
             e.dataTransfer.setData('text/plain', tag);  // フルパス
             e.dataTransfer.setData('application/x-nf-tag', tag);  // 統一MIME
             e.dataTransfer.effectAllowed = 'move';
+            // ポップオーバー要素に属性を設定
+            popover.setAttribute('data-dragging-tag', tag);
           });
 
           badge.addEventListener('dragend', () => {
             badge.classList.remove('nf-dragging');
+            popover.removeAttribute('data-dragging-tag');
             document.querySelectorAll('.nf-parent-drop-target').forEach(el => {
               el.classList.remove('nf-parent-drop-target');
             });
