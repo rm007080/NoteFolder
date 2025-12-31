@@ -298,11 +298,11 @@
    ======================================== */
 
 .nf-filter-container {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: 16px;
-  vertical-align: middle;
+  padding: 8px 16px;
+  margin: 8px 0;
 }
 
 .nf-filter-button {
@@ -748,10 +748,48 @@
   background-color: #444;
 }
 
+/* ラベル後の矢印削除（展開ボタンに置き換え） */
 .nf-dropdown-item.has-children .nf-dropdown-item-label::after {
-  content: ' ▸';
-  color: #666;
+  content: '';  /* ' ▸' を削除 */
+}
+
+/* ========================================
+   タグ展開/折りたたみボタン
+   ======================================== */
+
+/* 展開ボタン */
+.nf-tag-expand-btn {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin-right: 4px;
+  background: transparent;
+  border: none;
+  color: #888;
   font-size: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.15s ease, color 0.15s;
+}
+
+.nf-tag-expand-btn:hover {
+  color: #e0e0e0;
+}
+
+/* 展開状態の矢印（下向き = 90度回転） */
+.nf-tag-expand-btn.expanded {
+  transform: rotate(90deg);
+}
+
+/* 子タグがない場合のスペーサー（列揃え用） */
+.nf-tag-expand-spacer {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  flex-shrink: 0;
 }
 
 /* タグ色インジケーター */

@@ -185,6 +185,70 @@ async function saveDropdownHeight(height) {
 }
 
 // ========================================
+// タグ展開状態管理
+// ========================================
+
+/**
+ * 展開されているタグの一覧を取得
+ * @returns {Promise<string[]>} 展開されているタグ名の配列
+ */
+async function getExpandedTags() {
+  return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      resolve([]);
+      return;
+    }
+    chrome.storage.sync.get({ expandedTags: [] }, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage read error:', chrome.runtime.lastError.message);
+        resolve([]);
+        return;
+      }
+      resolve(result.expandedTags);
+    });
+  });
+}
+
+/**
+ * 展開されているタグの一覧を保存
+ * @param {string[]} tags - 展開されているタグ名の配列
+ * @returns {Promise<boolean>}
+ */
+async function saveExpandedTags(tags) {
+  return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      resolve(false);
+      return;
+    }
+    chrome.storage.sync.set({ expandedTags: tags }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage write error:', chrome.runtime.lastError.message);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
+}
+
+/**
+ * タグの展開状態をトグル
+ * @param {string} tagName - タグ名
+ * @param {string[]} currentExpanded - 現在の展開タグ配列
+ * @returns {Promise<string[]>} 更新後の展開タグ配列
+ */
+async function toggleTagExpansion(tagName, currentExpanded) {
+  let newExpanded;
+  if (currentExpanded.includes(tagName)) {
+    newExpanded = currentExpanded.filter(t => t !== tagName);
+  } else {
+    newExpanded = [...currentExpanded, tagName];
+  }
+  await saveExpandedTags(newExpanded);
+  return newExpanded;
+}
+
+// ========================================
 // tagMetaシャーディング
 // ========================================
 
@@ -2169,13 +2233,19 @@ let originalCardOrder = [];
  * @returns {HTMLElement|null}
  */
 function findFilterTargetElement() {
-  // mat-button-toggle-group（タブバー）を検索
-  const toggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
-  if (toggleGroup) {
-    return toggleGroup;
-  }
+  // 新: all-projects-containerを優先検索
+  const allProjectsContainer = document.querySelector('.all-projects-container');
+  if (allProjectsContainer) return allProjectsContainer;
 
-  // フォールバック: テキストで検索
+  // フォールバック: project-actions-container
+  const projectActionsContainer = document.querySelector('.project-actions-container');
+  if (projectActionsContainer) return projectActionsContainer;
+
+  // フォールバック: mat-button-toggle-group（タブバー）
+  const toggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
+  if (toggleGroup) return toggleGroup;
+
+  // フォールバック: テキスト検索（既存ロジック維持）
   const headers = document.querySelectorAll('h2, h3, div');
   for (const el of headers) {
     if (el.textContent.includes('最近のノートブック') ||
@@ -2645,6 +2715,9 @@ async function showTagDropdown(button) {
   // キャッシュからタグを取得
   const allTags = getCachedAllTags();
 
+  // 展開状態を取得
+  let expandedTags = await getExpandedTags();
+
   // 検索入力欄を追加
   const searchContainer = document.createElement('div');
   searchContainer.className = 'nf-dropdown-search';
@@ -2867,21 +2940,54 @@ async function showTagDropdown(button) {
     };
 
     // タグアイテムを作成する関数
-    const createTagItem = (tag, depth = 0) => {
+    const createTagItem = (tag, depth = 0, isSearchMode = false) => {
       const item = document.createElement('div');
       item.className = 'nf-dropdown-item';
       item.setAttribute('data-tag', tag);
       item.setAttribute('tabindex', '-1');
       item.setAttribute('draggable', 'true');
 
-      // 階層深度に応じたインデント
+      // 階層深度に応じたインデント（展開ボタン用に少し増加）
       if (depth > 0) {
         item.classList.add('nf-tag-tree-item');
-        item.style.paddingLeft = `${16 + depth * 16}px`;
+        item.style.paddingLeft = `${16 + depth * 20}px`;
       }
 
       if (selectedFilterTags.includes(tag)) {
         item.classList.add('selected');
+      }
+
+      // 子タグがあるかチェック（先に判定）
+      const hasChildren = currentTags.some(t =>
+        t !== tag && t.startsWith(tag + HIERARCHY_SEPARATOR)
+      );
+      if (hasChildren) {
+        item.classList.add('has-children');
+      }
+
+      // 展開/折りたたみボタン（親タグのみ、検索モードでは非表示）
+      if (hasChildren && !isSearchMode) {
+        const expandBtn = document.createElement('button');
+        expandBtn.className = 'nf-tag-expand-btn';
+        const isExpanded = expandedTags.includes(tag);
+        if (isExpanded) {
+          expandBtn.classList.add('expanded');
+        }
+        expandBtn.textContent = '▶';
+        expandBtn.setAttribute('title', isExpanded ? '折りたたむ' : '展開する');
+
+        expandBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();  // タグ選択と分離
+          expandedTags = await toggleTagExpansion(tag, expandedTags);
+          renderTagList(searchInput.value);
+        });
+
+        item.appendChild(expandBtn);
+      } else if (!isSearchMode) {
+        // 子タグがない場合はスペーサー（列揃え）
+        const spacer = document.createElement('span');
+        spacer.className = 'nf-tag-expand-spacer';
+        item.appendChild(spacer);
       }
 
       // 色インジケーター
@@ -2906,14 +3012,6 @@ async function showTagDropdown(button) {
         label.textContent = parts[parts.length - 1];
       } else {
         label.textContent = tag;
-      }
-
-      // 子タグがあるかチェック
-      const hasChildren = currentTags.some(t =>
-        t !== tag && t.startsWith(tag + HIERARCHY_SEPARATOR)
-      );
-      if (hasChildren) {
-        item.classList.add('has-children');
       }
 
       // 削除ボタン
@@ -3023,7 +3121,8 @@ async function showTagDropdown(button) {
       const rootTags = filteredTags.filter(tag => !getParentTag(tag));
 
       const renderTagWithChildren = (tag, depth) => {
-        tagListContainer.appendChild(createTagItem(tag, depth));
+        const item = createTagItem(tag, depth, false);  // isSearchMode = false
+        tagListContainer.appendChild(item);
 
         // 直接の子タグを取得
         const directChildren = filteredTags.filter(t => {
@@ -3031,16 +3130,21 @@ async function showTagDropdown(button) {
           return parent === tag;
         });
 
-        directChildren.forEach(childTag => {
-          renderTagWithChildren(childTag, depth + 1);
-        });
+        // 展開状態に応じて子タグを表示
+        const isExpanded = expandedTags.includes(tag);
+        if (isExpanded) {
+          directChildren.forEach(childTag => {
+            renderTagWithChildren(childTag, depth + 1);
+          });
+        }
+        // 展開されていない場合は子タグをレンダリングしない
       };
 
       rootTags.forEach(tag => renderTagWithChildren(tag, 0));
     } else {
-      // 検索時はフラット表示
+      // 検索時はフラット表示（全展開、展開ボタン非表示）
       filteredTags.forEach(tag => {
-        tagListContainer.appendChild(createTagItem(tag, 0));
+        tagListContainer.appendChild(createTagItem(tag, 0, true));  // isSearchMode = true
       });
     }
   };
@@ -3206,8 +3310,12 @@ function injectFilterUI() {
   filterContainer.appendChild(sortButton);
   filterContainer.appendChild(selectedContainer);
 
-  // mat-button-toggle-groupの場合は直後に挿入
-  if (targetElement.tagName.toLowerCase() === 'mat-button-toggle-group') {
+  // 挿入位置の決定
+  if (targetElement.classList.contains('all-projects-container')) {
+    // all-projects-containerの場合は直前に挿入
+    targetElement.parentNode.insertBefore(filterContainer, targetElement);
+  } else if (targetElement.tagName.toLowerCase() === 'mat-button-toggle-group') {
+    // mat-button-toggle-groupの場合は直後に挿入
     targetElement.parentNode.insertBefore(filterContainer, targetElement.nextSibling);
   } else {
     // フォールバック: ヘッダーの後に挿入
