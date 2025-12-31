@@ -3714,16 +3714,21 @@ function observeProjectList() {
       mutation.addedNodes.forEach((node) => {
         if (node.nodeType !== Node.ELEMENT_NODE) return;
 
+        const element = node;
+        if (!element.isConnected) return;
+        if (!element.matches && !element.querySelectorAll) return;
+
         // 追加されたノード自体が絵文字アイコンの場合
-        if (node.id && node.id.match(/^project-.+-emoji$/)) {
-          injectFolderIcon(node);
+        if (element.matches && element.matches(EMOJI_SELECTOR)) {
+          injectFolderIcon(element);
         }
 
         // 追加されたノードの子孫に絵文字アイコンがある場合
-        if (node.querySelectorAll) {
-          const emojiElements = node.querySelectorAll(EMOJI_SELECTOR);
+        if (element.querySelectorAll) {
+          const emojiElements = element.querySelectorAll(EMOJI_SELECTOR);
           if (emojiElements.length > 0) {
             emojiElements.forEach((emojiElement) => {
+              if (emojiElement === element) return;
               injectFolderIcon(emojiElement);
             });
           }

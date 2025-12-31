@@ -1,5 +1,18 @@
 /* NoteFolder - Content Script Styles */
-/* Step 2: フォルダアイコンスタイル */
+/* Sections:
+   1) Folder icon + pin icon
+   2) Toast
+   3) Popover
+   4) Filter UI + tag dropdown
+   5) Sort UI
+   6) Keyboard navigation
+   7) Tag colors + color picker
+   8) Tag tree + expand/collapse
+   9) Inline badges
+   10) Search input
+   11) Untagged + filter badges
+   12) Drag & drop helpers
+*/
 
 /* ========================================
    フォルダアイコン

@@ -130,6 +130,47 @@ Chromeのアドレスバーに `chrome://extensions` と入力してEnter
 
 ---
 
+## データの保存先について
+
+タグ情報は `chrome.storage.sync` に保存されます。  
+Chromeにログインしている場合、同じアカウントの別PCでも自動同期されます。
+
+保存される情報の例:
+- プロジェクトID
+- プロジェクト名（NotebookLMの画面から取得）
+- タグ（階層タグを含む）
+- タグ色
+- ピン留め状態
+- UI設定（ドロップダウン高さ・展開状態など）
+
+---
+
+## 使えない・表示されないときの確認
+
+UIが表示されない場合は、以下を順に確認してください。
+
+1. NotebookLM（https://notebooklm.google.com/）を開いているか
+2. `chrome://extensions` でNoteFolderの「更新」をクリック
+3. NotebookLMのページを再読み込み
+
+---
+
+## 注意点
+
+- 本拡張はNotebookLM公式の機能ではありません
+- NotebookLMの画面構成が変わると、動作しなくなる可能性があります
+- 同期は数秒遅れることがあります
+
+---
+
+## 不具合報告・要望
+
+不具合や要望はGitHubのIssuesからお願いします。
+
+👉 [GitHub Issues](https://github.com/rm007080/NoteFolder/issues)
+
+---
+
 ## 注意事項
 
 - Google Chrome専用です（Edge等のChromiumベースブラウザでも動作する可能性あり）
