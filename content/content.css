@@ -154,6 +154,41 @@
   min-height: 28px;
 }
 
+/* ポップオーバー内の親子タグ分離表示 */
+.nf-popover-parent-tags {
+  margin-bottom: 8px;
+}
+
+.nf-popover-child-tags {
+  border-top: 1px solid #444;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.nf-popover-section-label {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+/* 親タグバッジのD&D */
+.nf-tag-badge[draggable="true"] {
+  cursor: grab;
+}
+
+.nf-tag-badge[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.nf-tag-badge.nf-dragging {
+  opacity: 0.5;
+}
+
+.nf-tag-badge.nf-drop-target-badge {
+  outline: 2px dashed #34a853;
+  outline-offset: 2px;
+}
+
 .nf-no-tags {
   font-size: 13px;
   color: #666;
@@ -367,8 +402,49 @@
 }
 
 .nf-dropdown-list {
-  max-height: 200px;
   overflow-y: auto;
+  min-height: 100px;
+  /* heightはJSで直接設定（リサイズ機能対応） */
+}
+
+/* タグ選択ドロップダウン リサイズハンドル */
+.nf-dropdown-resize-handle {
+  height: 8px;
+  cursor: ns-resize;
+  flex-shrink: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 0px,
+    #555 2px,
+    transparent 3px,
+    #555 5px,
+    transparent 6px
+  );
+  border-radius: 0 0 8px 8px;
+}
+
+.nf-dropdown-resize-handle:hover {
+  background: linear-gradient(
+    to bottom,
+    transparent 0px,
+    #8ab4f8 2px,
+    transparent 3px,
+    #8ab4f8 5px,
+    transparent 6px
+  );
+}
+
+/* 固定オプションコンテナ */
+.nf-dropdown-fixed-options {
+  flex-shrink: 0;
+  border-bottom: 1px solid #444;
+}
+
+/* 固定オプションにフォーカススタイル追加 */
+.nf-root-drop-zone:focus,
+.nf-untagged-option:focus {
+  outline: 2px solid #4285f4;
+  outline-offset: -2px;
 }
 
 .nf-dropdown-empty {

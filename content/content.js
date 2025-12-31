@@ -31,6 +31,11 @@ const HIERARCHY_SEPARATOR = '/';
 // 現在のマイグレーションバージョン
 const CURRENT_MIGRATION_VERSION = 3;
 
+// ドロップダウンのデフォルト高さ（px）
+const DEFAULT_DROPDOWN_HEIGHT = 350;
+const MIN_DROPDOWN_HEIGHT = 100;
+const MAX_DROPDOWN_HEIGHT = 600;
+
 // タグカラーパレット（Google Material準拠）
 const TAG_COLOR_PALETTE = [
   { value: null, label: 'なし' },
@@ -128,6 +133,55 @@ function getChildTags(parentTag, allTags) {
  */
 function getTagDepth(tag) {
   return tag.split(HIERARCHY_SEPARATOR).length - 1;
+}
+
+// ========================================
+// ドロップダウン高さ管理
+// ========================================
+
+/**
+ * ドロップダウンの高さを取得
+ * @returns {Promise<number>} 高さ（px）
+ */
+async function getDropdownHeight() {
+  return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      resolve(DEFAULT_DROPDOWN_HEIGHT);
+      return;
+    }
+    chrome.storage.sync.get({ dropdownHeight: DEFAULT_DROPDOWN_HEIGHT }, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage read error:', chrome.runtime.lastError.message);
+        resolve(DEFAULT_DROPDOWN_HEIGHT);
+        return;
+      }
+      resolve(result.dropdownHeight);
+    });
+  });
+}
+
+/**
+ * ドロップダウンの高さを保存
+ * @param {number} height - 高さ（px）
+ * @returns {Promise<boolean>}
+ */
+async function saveDropdownHeight(height) {
+  return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      resolve(false);
+      return;
+    }
+    // 範囲制限
+    const clampedHeight = Math.max(MIN_DROPDOWN_HEIGHT, Math.min(MAX_DROPDOWN_HEIGHT, height));
+    chrome.storage.sync.set({ dropdownHeight: clampedHeight }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage write error:', chrome.runtime.lastError.message);
+        resolve(false);
+        return;
+      }
+      resolve(true);
+    });
+  });
 }
 
 // ========================================
@@ -928,6 +982,74 @@ function removeTagFromProject(projectId, tagToRemove) {
 }
 
 /**
+ * プロジェクトの親タグ順序を並び替え
+ * @param {string} projectId - プロジェクトID
+ * @param {string} draggedParent - ドラッグされた親タグ名
+ * @param {string} targetParent - ドロップ先の親タグ名
+ * @returns {Promise<boolean>}
+ */
+async function reorderProjectTags(projectId, draggedParent, targetParent) {
+  const cachedProject = getCachedProject(projectId);
+  if (!cachedProject?.tags?.length) return false;
+
+  const tags = [...cachedProject.tags];
+
+  // 親タグ名のリストを導出（順序保持）
+  const parentOrder = [];
+  const parentGroups = new Map();
+
+  tags.forEach(tag => {
+    const parent = tag.split(HIERARCHY_SEPARATOR)[0];
+    if (!parentGroups.has(parent)) {
+      parentOrder.push(parent);
+      parentGroups.set(parent, []);
+    }
+    parentGroups.get(parent).push(tag);
+  });
+
+  // 親タグの順序を変更
+  const draggedIndex = parentOrder.indexOf(draggedParent);
+  const targetIndex = parentOrder.indexOf(targetParent);
+
+  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
+    return false;
+  }
+
+  // 配列から削除して新しい位置に挿入
+  parentOrder.splice(draggedIndex, 1);
+  parentOrder.splice(targetIndex, 0, draggedParent);
+
+  // 新しい順序でタグ配列を再構築
+  const newTags = [];
+  parentOrder.forEach(parent => {
+    newTags.push(...parentGroups.get(parent));
+  });
+
+  // プロジェクトデータを更新
+  const project = { ...cachedProject };
+  project.tags = newTags;
+  project.updatedAt = Date.now();
+
+  return new Promise((resolve) => {
+    chrome.storage.sync.set(
+      { [`project:${projectId}`]: project },
+      () => {
+        if (chrome.runtime.lastError) {
+          console.error('Storage write error:', chrome.runtime.lastError.message);
+          resolve(false);
+          return;
+        }
+        // キャッシュを更新
+        updateCache(projectId, project, null);
+        // インラインバッジを更新
+        updateInlineBadges(projectId);
+        resolve(true);
+      }
+    );
+  });
+}
+
+/**
  * allTagsからタグを完全削除（全プロジェクトからも削除）
  * @param {string} tagToRemove - 削除するタグ
  * @param {boolean} skipConfirm - 確認ダイアログをスキップするかどうか
@@ -1216,11 +1338,16 @@ function hideTagPopover() {
  * @returns {HTMLElement}
  */
 function createTagBadge(tagName, onRemove, options = {}) {
-  const { showColorPicker = false, onColorChange } = options;
+  const { showColorPicker = false, onColorChange, displayName, tooltipText } = options;
 
   const badge = document.createElement('span');
   badge.className = 'nf-tag-badge';
   badge.setAttribute('data-tag', tagName);
+
+  // ツールチップを設定
+  if (tooltipText) {
+    badge.setAttribute('title', tooltipText);
+  }
 
   // タグの色を適用
   const color = getTagColor(tagName);
@@ -1230,10 +1357,10 @@ function createTagBadge(tagName, onRemove, options = {}) {
     badge.style.color = getContrastColor(color);
   }
 
-  // タグ名テキスト
+  // タグ名テキスト（displayNameがあればそれを表示）
   const tagText = document.createElement('span');
   tagText.className = 'nf-tag-badge-text';
-  tagText.textContent = tagName;
+  tagText.textContent = displayName || tagName;
   badge.appendChild(tagText);
 
   // カラーピッカーボタン（オプション）
@@ -1499,7 +1626,7 @@ function showTagPopover(targetElement, projectId) {
     const projectTags = project ? project.tags : [];
     const allTags = getCachedAllTags();
 
-    // タグ一覧を更新
+    // タグ一覧を更新（親子タグ分離表示）
     tagsList.innerHTML = '';
     if (projectTags.length === 0) {
       const noTags = document.createElement('span');
@@ -1507,22 +1634,127 @@ function showTagPopover(targetElement, projectId) {
       noTags.textContent = 'タグなし';
       tagsList.appendChild(noTags);
     } else {
-      projectTags.forEach(tag => {
-        const badge = createTagBadge(tag, async () => {
-          const success = await removeTagFromProject(projectId, tag);
-          if (success) {
+      // 親タグ名を導出（カードと同じロジック）
+      const parentTagNames = [...new Set(
+        projectTags.map(tag => tag.split(HIERARCHY_SEPARATOR)[0])
+      )];
+
+      // 子タグ（/を含むタグ）を抽出
+      const childTags = projectTags.filter(tag => tag.includes(HIERARCHY_SEPARATOR));
+
+      // 上段: 親タグ一覧（ドラッグ&ドロップ可能）
+      if (parentTagNames.length > 0) {
+        const parentSection = document.createElement('div');
+        parentSection.className = 'nf-popover-parent-tags nf-tags-list';
+
+        let draggedParent = null;
+
+        parentTagNames.forEach(parentName => {
+          const badge = createTagBadge(parentName, async () => {
+            // 親タグ削除時は、その親に属するすべてのタグを削除
+            const tagsToRemove = projectTags.filter(t => t.split(HIERARCHY_SEPARATOR)[0] === parentName);
+            for (const tag of tagsToRemove) {
+              await removeTagFromProject(projectId, tag);
+            }
             updateUI();
             updateFolderIconState(projectId);
-          }
-        }, {
-          showColorPicker: true,
-          onColorChange: () => {
-            updateUI();
-            updateAllInlineBadges();
-          }
+          }, {
+            showColorPicker: true,
+            onColorChange: () => {
+              updateUI();
+              updateAllInlineBadges();
+            }
+          });
+
+          // D&D属性を設定
+          badge.setAttribute('draggable', 'true');
+          badge.setAttribute('data-parent-tag', parentName);
+
+          badge.addEventListener('dragstart', (e) => {
+            draggedParent = parentName;
+            badge.classList.add('nf-dragging');
+            e.dataTransfer.setData('text/plain', parentName);
+            e.dataTransfer.effectAllowed = 'move';
+          });
+
+          badge.addEventListener('dragend', () => {
+            badge.classList.remove('nf-dragging');
+            draggedParent = null;
+            parentSection.querySelectorAll('.nf-drop-target-badge').forEach(el => {
+              el.classList.remove('nf-drop-target-badge');
+            });
+          });
+
+          badge.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (draggedParent && draggedParent !== parentName) {
+              e.dataTransfer.dropEffect = 'move';
+              badge.classList.add('nf-drop-target-badge');
+            }
+          });
+
+          badge.addEventListener('dragleave', () => {
+            badge.classList.remove('nf-drop-target-badge');
+          });
+
+          badge.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            badge.classList.remove('nf-drop-target-badge');
+            const dragged = e.dataTransfer.getData('text/plain');
+            if (dragged && dragged !== parentName) {
+              const success = await reorderProjectTags(projectId, dragged, parentName);
+              if (success) {
+                updateUI();
+              }
+            }
+          });
+
+          parentSection.appendChild(badge);
         });
-        tagsList.appendChild(badge);
-      });
+
+        tagsList.appendChild(parentSection);
+      }
+
+      // 下段: 子タグ一覧（末尾部分のみ表示）
+      if (childTags.length > 0) {
+        const childSection = document.createElement('div');
+        childSection.className = 'nf-popover-child-tags';
+
+        const childLabel = document.createElement('div');
+        childLabel.className = 'nf-popover-section-label';
+        childLabel.textContent = '子タグ:';
+        childSection.appendChild(childLabel);
+
+        const childList = document.createElement('div');
+        childList.className = 'nf-tags-list';
+
+        childTags.forEach(tag => {
+          // 末尾部分のみ表示
+          const parts = tag.split(HIERARCHY_SEPARATOR);
+          const displayName = parts[parts.length - 1];
+
+          const badge = createTagBadge(tag, async () => {
+            const success = await removeTagFromProject(projectId, tag);
+            if (success) {
+              updateUI();
+              updateFolderIconState(projectId);
+            }
+          }, {
+            showColorPicker: true,
+            onColorChange: () => {
+              updateUI();
+              updateAllInlineBadges();
+            },
+            displayName: displayName,
+            tooltipText: tag
+          });
+
+          childList.appendChild(badge);
+        });
+
+        childSection.appendChild(childList);
+        tagsList.appendChild(childSection);
+      }
     }
 
     // 候補のキーボードナビゲーション用インデックス
@@ -1697,15 +1929,25 @@ function createInlineBadges(projectId, max = 3) {
   container.className = 'nf-inline-badges';
   container.setAttribute('data-project-id', projectId);
 
-  project.tags.slice(0, max).forEach(tag => {
+  // 全タグから親タグ名を抽出（重複除去）
+  const parentTagNames = [...new Set(
+    project.tags.map(tag => {
+      const parts = tag.split(HIERARCHY_SEPARATOR);
+      return parts[0]; // 最上位の親タグ名
+    })
+  )];
+
+  // 親タグ名を基準にバッジ表示
+  parentTagNames.slice(0, max).forEach(tagName => {
     const badge = document.createElement('span');
     badge.className = 'nf-inline-badge';
-    // 階層タグの場合は最後の部分のみ表示
-    const parts = tag.split(HIERARCHY_SEPARATOR);
-    badge.textContent = parts[parts.length - 1];
-    badge.setAttribute('title', tag); // フルパスをツールチップに
+    badge.textContent = tagName;
 
-    const color = getTagColor(tag);
+    // このタグ名に該当する子タグをツールチップに表示
+    const childTags = project.tags.filter(t => t.split(HIERARCHY_SEPARATOR)[0] === tagName);
+    badge.setAttribute('title', childTags.join(', '));
+
+    const color = getTagColor(tagName);
     if (color) {
       badge.style.backgroundColor = color;
       badge.style.color = getContrastColor(color);
@@ -1713,11 +1955,11 @@ function createInlineBadges(projectId, max = 3) {
     container.appendChild(badge);
   });
 
-  // タグが3個以上ある場合は「+N」を表示
-  if (project.tags.length > max) {
+  // 親タグが3個以上ある場合は「+N」を表示
+  if (parentTagNames.length > max) {
     const more = document.createElement('span');
     more.className = 'nf-inline-badge nf-inline-badge-more';
-    more.textContent = `+${project.tags.length - max}`;
+    more.textContent = `+${parentTagNames.length - max}`;
     container.appendChild(more);
   }
 
@@ -2387,7 +2629,7 @@ function updateFilterUI() {
  * タグ選択ドロップダウンを表示
  * @param {HTMLElement} button - ドロップダウンボタン
  */
-function showTagDropdown(button) {
+async function showTagDropdown(button) {
   // 既存のドロップダウンを削除
   const existing = document.querySelector('.nf-tag-dropdown');
   if (existing) {
@@ -2397,6 +2639,8 @@ function showTagDropdown(button) {
 
   const dropdown = document.createElement('div');
   dropdown.className = 'nf-tag-dropdown';
+  dropdown.style.display = 'flex';
+  dropdown.style.flexDirection = 'column';
 
   // キャッシュからタグを取得
   const allTags = getCachedAllTags();
@@ -2416,7 +2660,151 @@ function showTagDropdown(button) {
   // タグリストコンテナ
   const tagListContainer = document.createElement('div');
   tagListContainer.className = 'nf-dropdown-list';
+
+  // 高さを設定（storageから取得）
+  const savedHeight = await getDropdownHeight();
+  tagListContainer.style.height = `${savedHeight}px`;
+
   dropdown.appendChild(tagListContainer);
+
+  // リサイズハンドル
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'nf-dropdown-resize-handle';
+  dropdown.appendChild(resizeHandle);
+
+  // リサイズ処理
+  let isResizing = false;
+  let startY = 0;
+  let startHeight = 0;
+
+  const handleMouseMove = (e) => {
+    if (!isResizing) return;
+    const deltaY = e.clientY - startY;
+    const newHeight = Math.max(MIN_DROPDOWN_HEIGHT, Math.min(MAX_DROPDOWN_HEIGHT, startHeight + deltaY));
+    tagListContainer.style.height = `${newHeight}px`;
+  };
+
+  const handleMouseUp = async () => {
+    if (!isResizing) return;
+    isResizing = false;
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    // 高さを保存
+    const currentHeight = parseInt(tagListContainer.style.height, 10);
+    await saveDropdownHeight(currentHeight);
+  };
+
+  resizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isResizing = true;
+    startY = e.clientY;
+    startHeight = parseInt(tagListContainer.style.height, 10) || savedHeight;
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  // 固定オプションコンテナ（スクロール外に配置）
+  const fixedOptionsContainer = document.createElement('div');
+  fixedOptionsContainer.className = 'nf-dropdown-fixed-options';
+
+  // ルートへ移動ドロップゾーン
+  const rootDropZone = document.createElement('div');
+  rootDropZone.className = 'nf-root-drop-zone';
+  rootDropZone.textContent = '📁 ルートに移動';
+  rootDropZone.setAttribute('tabindex', '-1');
+
+  rootDropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const draggingTag = dropdown.getAttribute('data-dragging-tag');
+    // 階層タグ（/を含む）のみドロップ可能
+    if (draggingTag && draggingTag.includes(HIERARCHY_SEPARATOR)) {
+      e.dataTransfer.dropEffect = 'move';
+      rootDropZone.classList.add('nf-drop-target');
+    }
+  });
+
+  rootDropZone.addEventListener('dragleave', () => {
+    rootDropZone.classList.remove('nf-drop-target');
+  });
+
+  rootDropZone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    rootDropZone.classList.remove('nf-drop-target');
+    const draggingTag = e.dataTransfer.getData('text/plain');
+    if (draggingTag && draggingTag.includes(HIERARCHY_SEPARATOR)) {
+      const success = await moveTagToParent(draggingTag, null);
+      if (success) {
+        renderTagList(searchInput.value);
+        for (const [projectId] of cache.projects) {
+          updateInlineBadges(projectId);
+        }
+        // ポップオーバーも更新
+        triggerUIRefresh();
+      }
+    }
+  });
+
+  fixedOptionsContainer.appendChild(rootDropZone);
+
+  // 「タグなし」オプション
+  const untaggedItem = document.createElement('div');
+  untaggedItem.className = 'nf-dropdown-item nf-untagged-option';
+  untaggedItem.setAttribute('tabindex', '-1');
+
+  const untaggedIcon = document.createElement('span');
+  untaggedIcon.className = 'nf-untagged-icon';
+  untaggedIcon.textContent = '📂';
+
+  const untaggedCheckbox = document.createElement('span');
+  untaggedCheckbox.className = 'nf-dropdown-checkbox';
+
+  const untaggedLabel = document.createElement('span');
+  untaggedLabel.className = 'nf-dropdown-item-label';
+  untaggedLabel.textContent = 'タグなし';
+
+  untaggedItem.appendChild(untaggedIcon);
+  untaggedItem.appendChild(untaggedCheckbox);
+  untaggedItem.appendChild(untaggedLabel);
+
+  // 「タグなし」オプションのUI更新関数
+  const updateUntaggedUI = () => {
+    const isUntaggedActive = currentFilters.some(f => f.type === FilterType.UNTAGGED);
+    if (isUntaggedActive) {
+      untaggedItem.classList.add('selected');
+      untaggedCheckbox.textContent = '✓';
+    } else {
+      untaggedItem.classList.remove('selected');
+      untaggedCheckbox.textContent = '';
+    }
+  };
+
+  // 初期状態を設定
+  updateUntaggedUI();
+
+  untaggedItem.addEventListener('click', () => {
+    const isUntaggedActive = currentFilters.some(f => f.type === FilterType.UNTAGGED);
+    if (isUntaggedActive) {
+      removeFilter(FilterType.UNTAGGED, true);
+    } else {
+      // タグフィルターをクリアして「タグなし」を追加
+      currentFilters = currentFilters.filter(f => f.type !== FilterType.TAG);
+      selectedFilterTags = [];
+      addFilter(FilterType.UNTAGGED, true);
+    }
+    applyFilters();
+    updateFilterUI();
+    updateUntaggedUI();
+    renderTagList(searchInput.value); // リストを再描画
+  });
+
+  fixedOptionsContainer.appendChild(untaggedItem);
+
+  // 固定オプションコンテナをsearchContainerの後に挿入
+  dropdown.insertBefore(fixedOptionsContainer, tagListContainer);
 
   // タグリストを描画する関数（階層表示対応）
   const renderTagList = (filterText = '') => {
@@ -2443,97 +2831,17 @@ function showTagDropdown(button) {
       );
     }
 
-    // ルートへ移動ドロップゾーン（検索時以外）
-    if (!filterText) {
-      const rootDropZone = document.createElement('div');
-      rootDropZone.className = 'nf-root-drop-zone';
-      rootDropZone.textContent = '📁 ルートに移動';
-
-      rootDropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        const draggingTag = dropdown.getAttribute('data-dragging-tag');
-        // 階層タグ（/を含む）のみドロップ可能
-        if (draggingTag && draggingTag.includes(HIERARCHY_SEPARATOR)) {
-          e.dataTransfer.dropEffect = 'move';
-          rootDropZone.classList.add('nf-drop-target');
-        }
-      });
-
-      rootDropZone.addEventListener('dragleave', () => {
-        rootDropZone.classList.remove('nf-drop-target');
-      });
-
-      rootDropZone.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        rootDropZone.classList.remove('nf-drop-target');
-        const draggingTag = e.dataTransfer.getData('text/plain');
-        if (draggingTag && draggingTag.includes(HIERARCHY_SEPARATOR)) {
-          const success = await moveTagToParent(draggingTag, null);
-          if (success) {
-            renderTagList(searchInput.value);
-            for (const [projectId] of cache.projects) {
-              updateInlineBadges(projectId);
-            }
-            // ポップオーバーも更新
-            triggerUIRefresh();
-          }
-        }
-      });
-
-      tagListContainer.appendChild(rootDropZone);
-    }
-
-    // 「タグなし」オプションを追加（検索時以外）
-    if (!filterText) {
-      const untaggedItem = document.createElement('div');
-      untaggedItem.className = 'nf-dropdown-item nf-untagged-option';
-      untaggedItem.setAttribute('tabindex', '-1');
-
-      // UNTAGGEDフィルターが有効かチェック
-      const isUntaggedActive = currentFilters.some(f => f.type === FilterType.UNTAGGED);
-      if (isUntaggedActive) {
-        untaggedItem.classList.add('selected');
-      }
-
-      const untaggedIcon = document.createElement('span');
-      untaggedIcon.className = 'nf-untagged-icon';
-      untaggedIcon.textContent = '📂';
-
-      const untaggedCheckbox = document.createElement('span');
-      untaggedCheckbox.className = 'nf-dropdown-checkbox';
-      untaggedCheckbox.textContent = isUntaggedActive ? '✓' : '';
-
-      const untaggedLabel = document.createElement('span');
-      untaggedLabel.className = 'nf-dropdown-item-label';
-      untaggedLabel.textContent = 'タグなし';
-
-      untaggedItem.appendChild(untaggedIcon);
-      untaggedItem.appendChild(untaggedCheckbox);
-      untaggedItem.appendChild(untaggedLabel);
-
-      untaggedItem.addEventListener('click', () => {
-        if (isUntaggedActive) {
-          removeFilter(FilterType.UNTAGGED, true);
-          untaggedItem.classList.remove('selected');
-          untaggedCheckbox.textContent = '';
-        } else {
-          // タグフィルターをクリアして「タグなし」を追加
-          currentFilters = currentFilters.filter(f => f.type !== FilterType.TAG);
-          selectedFilterTags = [];
-          addFilter(FilterType.UNTAGGED, true);
-          untaggedItem.classList.add('selected');
-          untaggedCheckbox.textContent = '✓';
-        }
-        applyFilters();
-        updateFilterUI();
-        renderTagList(searchInput.value); // リストを再描画
-      });
-
-      tagListContainer.appendChild(untaggedItem);
+    // 固定オプションの表示/非表示（検索時は非表示）
+    if (filterText) {
+      fixedOptionsContainer.style.display = 'none';
+    } else {
+      fixedOptionsContainer.style.display = '';
+      // 「タグなし」の選択状態を更新
+      updateUntaggedUI();
     }
 
     if (filteredTags.length === 0 && !filterText) {
-      // 「タグなし」オプションのみ表示（タグがない場合）
+      // 固定オプションのみ表示（タグがない場合）
       return;
     } else if (filteredTags.length === 0) {
       const noTags = document.createElement('div');
@@ -2749,12 +3057,17 @@ function showTagDropdown(button) {
 
   // キーボードナビゲーションをセットアップ
   const closeDropdown = () => {
+    // リサイズ関連のイベントリスナーをクリーンアップ
+    document.removeEventListener('mousemove', handleMouseMove);
+    document.removeEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
     dropdown.remove();
     uiUpdateCallbacks.dropdown = null;
   };
   setupKeyboardNavigation(
-    tagListContainer,
-    '.nf-dropdown-item',
+    dropdown,
+    '.nf-dropdown-item, .nf-root-drop-zone',
     (item) => {
       // アイテムをクリックしたのと同じ動作
       item.click();
