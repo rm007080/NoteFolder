@@ -10,161 +10,75 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 
 ## 現在の状況
 
-### ステータス: バグ修正実装待ち
+### ステータス: タグ表示改善 - 実装待ち
 
-全機能実装完了後、以下の3つのバグが報告され、実装計画が承認済み。
-
----
-
-## 修正対象バグ（3件）
-
-### バグ1&2: タグ操作後のUI即時更新問題
-**現象**:
-- ドラッグ&ドロップでタグを親タグに移動
-- ×ボタンでタグ削除
-- 「ルートに移動」で子タグ解除
-- タグカラー変更
-
-これらの操作後、**ブラウザ更新なしでは見た目が変わらない**
-
-**原因**: `onColorChange` コールバック（行1492）が `updateUI()` のみ呼び出し。インラインバッジ（プロジェクトカード上）が更新されない。
-
-### バグ3: SPAナビゲーション後のUI消失
-**現象**: プロジェクトを開いて戻るボタンで戻ると、フィルターUI（検索、タグ、ソート）が消える
-
-**原因**:
-- `filterUIInjected` フラグがリセットされない
-- `originalCardOrder` が古いDOMノード参照を保持
-- `popstate` イベント監視がない
+前回のUI即時更新バグ修正が完了し、新機能の実装計画が確定済み。
 
 ---
 
-## 承認済み実装計画
+## 次に実装する機能（5件）
 
-**計画ファイル**: `実装計画_UI更新バグ修正.md`
+詳細は `実装計画_タグ表示改善.md` を参照。
 
-### Phase 1: ユーティリティ関数追加
+| # | 要件 | 概要 |
+|---|------|------|
+| 1 | 親タグのみ表示 | カードに子タグから導出した親タグ名を表示 |
+| 2 | ポップオーバー改善 | 上段:親タグ（D&D可）、下段:子タグ |
+| 3 | 高さ拡大 | デフォルト350px |
+| 4 | リサイズ機能 | 下辺ドラッグで100-600px可変、サイズ保存 |
+| 5 | 固定表示 | 「ルートに移動」「タグなし」をスクロール外に |
 
-#### 1-1. `updateAllInlineBadges()` 追加（行1715の後）
-```javascript
-function updateAllInlineBadges() {
-  const visibleIcons = document.querySelectorAll('.nf-folder-icon[data-project-id]');
-  visibleIcons.forEach(icon => {
-    const projectId = icon.getAttribute('data-project-id');
-    if (projectId) {
-      updateInlineBadges(projectId);
-    }
-  });
-}
-```
+### 実装順序
+1. 要件3+4: 高さ+リサイズ（CSS修正 + JS追加）
+2. 要件5: 固定表示（構造変更 + キーボード対応）
+3. 要件1: 親タグ抽出（createInlineBadges修正）
+4. 要件2: ポップオーバー改善（親子分離 + D&D）
 
-#### 1-2. `resetUIState()` 追加（行1918の後）
-```javascript
-function resetUIState() {
-  originalCardOrder = [];
-  filterUIInjected = false;
-  currentFilters = [];
-  selectedFilterTags = [];
-  currentSortType = 'default';
-}
-```
+### 対象ファイルと行番号
+- `content/content.js`:
+  - `createInlineBadges`: 行1692-1725（要件1）
+  - `showTagPopover`: 行1388-1658（要件2）
+  - `showTagDropdown`: 行2390-2815（要件3,4,5）
+- `content/content.css`:
+  - `.nf-dropdown-list`: 行369-372（要件3,4）
 
-### Phase 2: カラー変更時のUI更新修正（行1492）
-```javascript
-// 修正前: onColorChange: () => updateUI()
-// 修正後:
-onColorChange: () => {
-  updateUI();
-  updateAllInlineBadges();
-}
-```
+### 新規追加する関数
+- `getDropdownHeight()`: storage読込
+- `saveDropdownHeight(height)`: storage保存
+- `reorderProjectTags(projectId, fromIndex, toIndex)`: タグ並び替え
 
-### Phase 3: フィルターUI注入関数の強化（行2752-2758）
-```javascript
-function injectFilterUI() {
-  const existingFilterUI = document.querySelector('.nf-filter-container');
-  if (filterUIInjected && existingFilterUI) return;
-  if (!existingFilterUI) {
-    filterUIInjected = false;
-  }
-  const targetElement = findFilterTargetElement();
-  // ...
-}
-```
-
-### Phase 4: SPAナビゲーション監視機能追加（行2906の後）
-
-#### 4-1. `isProjectListPage()` 追加
-```javascript
-function isProjectListPage() {
-  const url = window.location.href;
-  return url.includes('notebooklm.google.com') &&
-         !url.includes('/notebook/') &&
-         !url.includes('/project/');
-}
-```
-
-#### 4-2. `setupSPANavigationListener()` 追加
-```javascript
-function setupSPANavigationListener() {
-  const originalPushState = history.pushState;
-  const originalReplaceState = history.replaceState;
-
-  history.pushState = function(...args) {
-    originalPushState.apply(this, args);
-    handleNavigationChange();
-  };
-
-  history.replaceState = function(...args) {
-    originalReplaceState.apply(this, args);
-    handleNavigationChange();
-  };
-
-  window.addEventListener('popstate', handleNavigationChange);
-
-  function handleNavigationChange() {
-    const tryReinject = (attempt = 1, maxAttempts = 5) => {
-      if (!isProjectListPage()) return;
-
-      const existingFilterUI = document.querySelector('.nf-filter-container');
-      const targetElement = findFilterTargetElement();
-
-      if (!existingFilterUI && targetElement) {
-        resetUIState();
-        injectAllFolderIcons();
-        injectFilterUI();
-        saveOriginalCardOrder();
-        setupSectionToggleListener();
-        for (const [projectId] of cache.projects) {
-          updateFolderIconState(projectId);
-        }
-      } else if (!existingFilterUI && !targetElement && attempt < maxAttempts) {
-        setTimeout(() => tryReinject(attempt + 1, maxAttempts), 300);
-      }
-    };
-    setTimeout(() => tryReinject(), 300);
-  }
-}
-```
-
-### Phase 5: 初期化関数での呼び出し追加（行2946の後）
-```javascript
-setupSPANavigationListener();
-```
+### Codexレビュー結果
+- **P0問題: なし**
+- 実装可能: はい
 
 ---
 
-## 修正箇所サマリー
+## 完了済みの修正
 
-| Phase | 内容 | 行番号 | 種別 |
-|-------|------|--------|------|
-| Phase 1-1 | `updateAllInlineBadges()` 追加 | 1715後 | 新規 |
-| Phase 1-2 | `resetUIState()` 追加 | 1918後 | 新規 |
-| Phase 2-1 | `onColorChange` コールバック修正 | 1492 | 修正 |
-| Phase 3-1 | `injectFilterUI()` DOM存在確認追加 | 2752-2758 | 修正 |
-| Phase 4-1 | `isProjectListPage()` 追加 | 2906後 | 新規 |
-| Phase 4-2 | `setupSPANavigationListener()` 追加 | 2906後 | 新規 |
-| Phase 5-1 | `initNoteFolder()` 呼び出し追加 | 2946後 | 修正 |
+### 第3回修正（2025-12-31）- タグ選択メニュー即時更新
+
+**問題**: タグ選択メニュー（ドロップダウン）でタグ削除/移動後、UIが即座に更新されなかった
+
+**解決策**: `renderTagList`関数内で毎回`getCachedAllTags()`を呼び出すように変更
+
+### 第2回修正 - イベントベースUI同期機構
+
+```javascript
+const uiUpdateCallbacks = {
+  popover: null,
+  dropdown: null
+};
+
+function triggerUIRefresh() {
+  if (uiUpdateCallbacks.popover) uiUpdateCallbacks.popover();
+  if (uiUpdateCallbacks.dropdown) uiUpdateCallbacks.dropdown();
+}
+```
+
+### 第1回修正 - 完了済み
+- タグカラー変更後のUI更新
+- SPAナビゲーション後のUI再注入
+- セクション切り替え後のUI維持
 
 ---
 
@@ -174,25 +88,18 @@ setupSPANavigationListener();
 NoteFolder/
 ├── manifest.json              # Content Script設定済み
 ├── content/
-│   ├── content.js             # メインロジック（約2800行）★修正対象
-│   └── content.css            # スタイル（約860行）
+│   ├── content.js             # メインロジック（約3080行）
+│   └── content.css            # スタイル
 ├── popup/
 │   ├── popup.html
 │   ├── popup.css
 │   └── popup.js
 ├── icons/
-├── 実装計画_UI更新バグ修正.md  # 承認済み実装計画（詳細）
+├── 実装計画_タグ表示改善.md   # ★次に実装する計画
+├── 実装計画_UI更新バグ修正.md  # 第1回修正の計画
 ├── TAKEOVER.md                # この引き継ぎドキュメント
 └── CLAUDE.md                  # プロジェクト指示書
 ```
-
----
-
-## 次のアクション
-
-1. **`content/content.js` を読み込む**
-2. **Phase 1から順に実装を開始**
-3. **各Phase完了後、動作確認**
 
 ---
 
@@ -205,19 +112,33 @@ NoteFolder/
 ### 実装上の注意
 - **XSS対策**: ユーザー入力は必ず`textContent`で表示
 - **lastErrorチェック**: 全storage操作で`chrome.runtime.lastError`を確認
+- **flex: 1は使用しない**: リサイズ機能と競合するため
 
 ---
 
-## テスト確認項目
+## 技術詳細
 
-1. タグカラー変更 → インラインバッジの色が即座に変わる
-2. タグをドラッグ&ドロップで親タグに移動 → タグ名が即座に変わる
-3. ×ボタンでタグ削除 → バッジが即座に消える
-4. 「ルートに移動」で子タグ解除 → タグ名が即座に変わる
-5. プロジェクトを開いて戻る → フィルターUIが表示されている
-6. セクション切り替え → フィルターUIが維持される
+### 親タグ抽出ロジック
+```javascript
+const parentTagNames = [...new Set(
+  project.tags.map(tag => tag.split(HIERARCHY_SEPARATOR)[0])
+)];
+```
+
+### UI更新の仕組み
+```
+タグ操作（削除/移動/並び替え）
+  ↓
+データ更新（chrome.storage.sync）
+  ↓
+triggerUIRefresh() 呼び出し
+  ↓
+uiUpdateCallbacks.popover() / dropdown()
+  ↓
+UI即座更新
+```
 
 ---
 
 **最終更新**: 2025-12-31
-**ステータス**: 実装計画承認済み、実装待ち
+**ステータス**: タグ表示改善 実装待ち

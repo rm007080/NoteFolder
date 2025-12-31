@@ -62,6 +62,30 @@ let cacheReadyPromise = null;
 let cacheReadyResolve = null;
 
 // ========================================
+// UI更新コールバック
+// ========================================
+
+/**
+ * UIコンポーネントの更新コールバックを格納
+ */
+const uiUpdateCallbacks = {
+  popover: null,    // showTagPopover内のupdateUI
+  dropdown: null    // showTagDropdown内のrenderTagList
+};
+
+/**
+ * 全てのアクティブなUIコンポーネントを更新
+ */
+function triggerUIRefresh() {
+  if (uiUpdateCallbacks.popover) {
+    uiUpdateCallbacks.popover();
+  }
+  if (uiUpdateCallbacks.dropdown) {
+    uiUpdateCallbacks.dropdown();
+  }
+}
+
+// ========================================
 // 階層タグ関数
 // ========================================
 
@@ -922,11 +946,12 @@ async function removeTagFromAllProjects(tagToRemove, skipConfirm = false) {
   // 子タグを取得
   const childTags = getChildTags(tagToRemove, cachedAllTags);
 
-  // 子タグがある場合は確認
-  if (!skipConfirm && childTags.length > 0) {
-    const confirmed = confirm(
-      `「${tagToRemove}」を削除すると、子タグ（${childTags.length}個）も削除されます。続行しますか？`
-    );
+  // 削除確認ダイアログ（常に表示）
+  if (!skipConfirm) {
+    const message = childTags.length > 0
+      ? `「${tagToRemove}」を削除すると、子タグ（${childTags.length}個）も削除されます。続行しますか？`
+      : `タグ「${tagToRemove}」を削除しますか？`;
+    const confirmed = confirm(message);
     if (!confirmed) return false;
   }
 
@@ -1177,6 +1202,8 @@ function hideTagPopover() {
     currentPopover.remove();
     currentPopover = null;
   }
+  // コールバックを解除
+  uiUpdateCallbacks.popover = null;
 }
 
 /**
@@ -1489,7 +1516,10 @@ function showTagPopover(targetElement, projectId) {
           }
         }, {
           showColorPicker: true,
-          onColorChange: () => updateUI()
+          onColorChange: () => {
+            updateUI();
+            updateAllInlineBadges();
+          }
         });
         tagsList.appendChild(badge);
       });
@@ -1611,6 +1641,8 @@ function showTagPopover(targetElement, projectId) {
   };
 
   updateUI();
+  // グローバルUI更新コールバックを登録
+  uiUpdateCallbacks.popover = updateUI;
   input.focus();
 
   // 外側クリックで閉じる
@@ -1712,6 +1744,20 @@ function updateInlineBadges(projectId) {
   if (folderIcon && folderIcon.parentElement) {
     folderIcon.parentElement.insertBefore(newBadges, folderIcon.nextSibling);
   }
+}
+
+/**
+ * 表示中の全プロジェクトのインラインバッジを更新
+ * パフォーマンス: cache.projects全体ではなく、DOM上に存在するもののみ対象
+ */
+function updateAllInlineBadges() {
+  const visibleIcons = document.querySelectorAll('.nf-folder-icon[data-project-id]');
+  visibleIcons.forEach(icon => {
+    const projectId = icon.getAttribute('data-project-id');
+    if (projectId) {
+      updateInlineBadges(projectId);
+    }
+  });
 }
 
 // ========================================
@@ -1915,6 +1961,17 @@ function saveOriginalCardOrder() {
   if (cards.length > 0 && originalCardOrder.length === 0) {
     originalCardOrder = cards;
   }
+}
+
+/**
+ * ナビゲーション時にUI状態をリセット
+ */
+function resetUIState() {
+  originalCardOrder = [];
+  filterUIInjected = false;
+  currentFilters = [];
+  selectedFilterTags = [];
+  currentSortType = 'default';
 }
 
 /**
@@ -2365,6 +2422,9 @@ function showTagDropdown(button) {
   const renderTagList = (filterText = '') => {
     tagListContainer.innerHTML = '';
 
+    // 毎回最新のタグリストをキャッシュから取得
+    const currentTags = getCachedAllTags();
+
     // タグ使用統計を計算
     const usageCounts = {};
     for (const [id, project] of cache.projects) {
@@ -2375,10 +2435,10 @@ function showTagDropdown(button) {
       }
     }
 
-    let filteredTags = allTags;
+    let filteredTags = currentTags;
     if (filterText) {
       // 検索時はフラット表示
-      filteredTags = allTags.filter(tag =>
+      filteredTags = currentTags.filter(tag =>
         tag.toLowerCase().includes(filterText.toLowerCase())
       );
     }
@@ -2410,11 +2470,12 @@ function showTagDropdown(button) {
         if (draggingTag && draggingTag.includes(HIERARCHY_SEPARATOR)) {
           const success = await moveTagToParent(draggingTag, null);
           if (success) {
-            allTags = getAllTagNames();
             renderTagList(searchInput.value);
             for (const [projectId] of cache.projects) {
               updateInlineBadges(projectId);
             }
+            // ポップオーバーも更新
+            triggerUIRefresh();
           }
         }
       });
@@ -2540,7 +2601,7 @@ function showTagDropdown(button) {
       }
 
       // 子タグがあるかチェック
-      const hasChildren = allTags.some(t =>
+      const hasChildren = currentTags.some(t =>
         t !== tag && t.startsWith(tag + HIERARCHY_SEPARATOR)
       );
       if (hasChildren) {
@@ -2563,6 +2624,8 @@ function showTagDropdown(button) {
           for (const [projectId] of cache.projects) {
             updateFolderIconState(projectId);
           }
+          // ポップオーバーも更新
+          triggerUIRefresh();
         }
       });
 
@@ -2632,13 +2695,13 @@ function showTagDropdown(button) {
         if (draggingTag && draggingTag !== tag) {
           const success = await moveTagToParent(draggingTag, tag);
           if (success) {
-            // allTagsを再取得してキャッシュを更新
-            allTags = getAllTagNames();
             renderTagList(searchInput.value);
             // インラインバッジも更新
             for (const [projectId] of cache.projects) {
               updateInlineBadges(projectId);
             }
+            // ポップオーバーも更新
+            triggerUIRefresh();
           }
         }
       });
@@ -2676,6 +2739,8 @@ function showTagDropdown(button) {
 
   // 初期描画
   renderTagList();
+  // グローバルUI更新コールバックを登録
+  uiUpdateCallbacks.dropdown = () => renderTagList(searchInput.value);
 
   // 検索入力イベント
   searchInput.addEventListener('input', () => {
@@ -2683,7 +2748,10 @@ function showTagDropdown(button) {
   });
 
   // キーボードナビゲーションをセットアップ
-  const closeDropdown = () => dropdown.remove();
+  const closeDropdown = () => {
+    dropdown.remove();
+    uiUpdateCallbacks.dropdown = null;
+  };
   setupKeyboardNavigation(
     tagListContainer,
     '.nf-dropdown-item',
@@ -2737,7 +2805,7 @@ function showTagDropdown(button) {
   // 外側クリックで閉じる
   const handleClickOutside = (e) => {
     if (!dropdown.contains(e.target) && !button.contains(e.target)) {
-      dropdown.remove();
+      closeDropdown();
       document.removeEventListener('click', handleClickOutside);
     }
   };
@@ -2750,7 +2818,11 @@ function showTagDropdown(button) {
  * フィルターUIを注入
  */
 function injectFilterUI() {
-  if (filterUIInjected) return;
+  const existingFilterUI = document.querySelector('.nf-filter-container');
+  if (filterUIInjected && existingFilterUI) return;
+  if (!existingFilterUI) {
+    filterUIInjected = false;
+  }
 
   const targetElement = findFilterTargetElement();
   if (!targetElement) {
@@ -2905,6 +2977,67 @@ function setupSectionToggleListener() {
   }, { capture: true });
 }
 
+/**
+ * 現在のページがプロジェクト一覧ページかどうかを判定
+ */
+function isProjectListPage() {
+  const url = window.location.href;
+  return url.includes('notebooklm.google.com') &&
+         !url.includes('/notebook/') &&
+         !url.includes('/project/');
+}
+
+/**
+ * SPAナビゲーションを監視
+ */
+function setupSPANavigationListener() {
+  // history.pushState/replaceStateをフック
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    handleNavigationChange();
+  };
+
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    handleNavigationChange();
+  };
+
+  // popstateイベント（ブラウザの戻る/進む）
+  window.addEventListener('popstate', handleNavigationChange);
+
+  function handleNavigationChange() {
+    // リトライロジック（最大5回、300ms間隔）
+    const tryReinject = (attempt = 1, maxAttempts = 5) => {
+      // 一覧ページでない場合は終了
+      if (!isProjectListPage()) return;
+
+      const existingFilterUI = document.querySelector('.nf-filter-container');
+      const targetElement = findFilterTargetElement();
+
+      if (!existingFilterUI && targetElement) {
+        // ターゲット要素が存在 → UI注入実行
+        resetUIState();
+        injectAllFolderIcons();
+        injectFilterUI();
+        saveOriginalCardOrder();
+        setupSectionToggleListener(); // セクションタブリスナーも再設定
+        for (const [projectId] of cache.projects) {
+          updateFolderIconState(projectId);
+        }
+      } else if (!existingFilterUI && !targetElement && attempt < maxAttempts) {
+        // ターゲット要素がまだない → リトライ
+        setTimeout(() => tryReinject(attempt + 1, maxAttempts), 300);
+      }
+    };
+
+    // 初回は300ms後に開始
+    setTimeout(() => tryReinject(), 300);
+  }
+}
+
 // ========================================
 // 初期化
 // ========================================
@@ -2944,6 +3077,9 @@ function initNoteFolder() {
 
     // セクション切り替えボタンの監視をセットアップ
     setupSectionToggleListener();
+
+    // SPAナビゲーション監視をセットアップ
+    setupSPANavigationListener();
   });
 }
 
