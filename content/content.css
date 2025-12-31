@@ -297,12 +297,17 @@
    フィルターUI
    ======================================== */
 
+/* NotebookLM側のスタイルをオーバーライド */
+.project-actions-container.project-actions-container-tab-view {
+  padding-bottom: 0 !important;
+}
+
 .nf-filter-container {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
-  margin: 8px 0;
+  padding: 0 16px 8px 16px;
+  margin: 0 0 8px 0;
 }
 
 .nf-filter-button {
@@ -798,12 +803,14 @@
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-right: 4px;
 }
 
 .nf-tag-color-indicator.no-color {
   background-color: transparent;
   border: 1px solid #555;
 }
+
 
 /* ========================================
    インラインバッジ（タグ常時表示）
@@ -965,4 +972,155 @@
 
 .nf-pin-icon.pinned:hover {
   color: #f9a825;
+}
+
+/* ========================================
+   機能1: ポップオーバーD&D改善
+   ======================================== */
+
+/* タグ間ドロップゾーン（順番変更用） */
+.nf-tag-drop-zone {
+  width: 4px;
+  height: 24px;
+  margin: 0 2px;
+  background-color: transparent;
+  border-radius: 2px;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* ドラッグ中のみドロップゾーンを有効化 */
+.nf-popover-parent-tags.nf-dragging-active .nf-tag-drop-zone {
+  pointer-events: auto;
+}
+
+.nf-tag-drop-zone.nf-drop-active {
+  width: 4px;
+  background-color: #4285f4;
+  box-shadow: 0 0 6px rgba(66, 133, 244, 0.6);
+}
+
+/* 親子関係ドロップターゲット（バッジ上） */
+.nf-tag-badge.nf-parent-drop-target {
+  outline: 2px solid #34a853;
+  outline-offset: 2px;
+  background-color: rgba(52, 168, 83, 0.2);
+}
+
+/* ドラッグ中のバッジスタイル改善 */
+.nf-tag-badge.nf-dragging {
+  opacity: 0.4;
+  transform: scale(0.95);
+}
+
+/* ========================================
+   機能2: ソート統合（ドロップダウン内ツールバー）
+   ======================================== */
+
+/* ドロップダウン内ツールバー */
+.nf-dropdown-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #444;
+  background-color: #252525;
+}
+
+.nf-toolbar-separator {
+  color: #555;
+  font-size: 12px;
+}
+
+/* インラインソートセレクター */
+.nf-inline-sort-selector {
+  position: relative;
+}
+
+.nf-inline-sort-btn {
+  background: transparent;
+  border: 1px solid #5f6368;
+  border-radius: 12px;
+  color: #e0e0e0;
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.nf-inline-sort-btn:hover {
+  background-color: rgba(138, 180, 248, 0.1);
+  border-color: #8ab4f8;
+}
+
+.nf-inline-sort-btn.active {
+  background-color: rgba(66, 133, 244, 0.2);
+  border-color: #4285f4;
+}
+
+.nf-inline-sort-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  min-width: 140px;
+  background-color: #2d2d2d;
+  border: 1px solid #444;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 10001;
+}
+
+.nf-inline-sort-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #e0e0e0;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.nf-inline-sort-option:hover {
+  background-color: rgba(66, 133, 244, 0.2);
+}
+
+.nf-inline-sort-option.selected {
+  background-color: rgba(66, 133, 244, 0.15);
+}
+
+.nf-inline-sort-radio {
+  width: 14px;
+  color: #4285f4;
+  font-size: 10px;
+}
+
+/* ツールバー内のタグなし・ルート移動のコンパクト版 */
+.nf-dropdown-toolbar .nf-toolbar-untagged,
+.nf-dropdown-toolbar .nf-toolbar-root {
+  border: none;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: #e0e0e0;
+  background: transparent;
+}
+
+.nf-dropdown-toolbar .nf-toolbar-untagged:hover,
+.nf-dropdown-toolbar .nf-toolbar-root:hover {
+  background-color: rgba(138, 180, 248, 0.1);
+}
+
+.nf-dropdown-toolbar .nf-toolbar-untagged.selected {
+  background-color: rgba(66, 133, 244, 0.2);
+}
+
+.nf-dropdown-toolbar .nf-toolbar-root.nf-drop-target {
+  background-color: rgba(52, 168, 83, 0.2);
+  color: #34a853;
 }
