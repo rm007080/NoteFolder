@@ -10,162 +10,110 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 
 ## 現在の状況
 
-### ステータス: 機能更新実装完了・動作確認待ち
+### ステータス: 3つのバグ修正実装待ち
 
-2つの機能更新を実装完了。`chrome://extensions`で拡張機能を更新してテストが必要。
-
----
-
-## 今回実装した機能（2025-12-31）
-
-### 機能1: タグポップオーバーのD&D動作改善
-
-**変更前**: タグをドラッグして別のタグに重ねると順番が変わる
-
-**変更後**:
-- **タグ同士を重ねる** → 親子関係にする（移動元が移動先の子タグになる、全プロジェクトに影響）
-- **タグ間の縦棒インジケーター** → その位置に挿入して順番変更（このプロジェクトのみ）
-
-#### 修正ファイル・箇所
-
-| ファイル | 行番号 | 内容 |
-|----------|--------|------|
-| content/content.css | 977-1015 | ドロップゾーン・親子関係ターゲットのCSS |
-| content/content.js | 1116-1186 | `reorderProjectTagsAtIndex()` 新関数追加 |
-| content/content.js | 1781-1906 | `showTagPopover()`内のD&D処理全面書き換え |
-
-#### 新規CSS クラス
-- `.nf-tag-drop-zone` - タグ間の縦棒ドロップゾーン（順番変更用）
-- `.nf-tag-drop-zone.nf-drop-active` - ドラッグホバー時の青色表示
-- `.nf-popover-parent-tags.nf-dragging-active` - ドラッグ中の親セクション
-- `.nf-tag-badge.nf-parent-drop-target` - 親子関係ドロップ時の緑枠表示
-- `.nf-tag-badge.nf-dragging` - ドラッグ中のバッジ（半透明）
-
-#### 新規関数
-```javascript
-// content/content.js:1116-1186
-async function reorderProjectTagsAtIndex(projectId, draggedParent, targetIndex)
-// 指定インデックスの位置にタグを移動（このプロジェクトのみ）
-```
-
-### 機能2: タグドロップダウンにソート窓を統合
-
-**変更前**: フィルターUIに「タグ▼」「ソート▼」ボタンが別々に存在
-
-**変更後**:
-- タグドロップダウン内にツールバー形式で配置
-- 1行に「📊 ソート選択 | 📂 タグなし | 📁 ルートへ」
-- 外部のソートボタンは削除
-
-#### 修正ファイル・箇所
-
-| ファイル | 行番号 | 内容 |
-|----------|--------|------|
-| content/content.css | 1017-1126 | ツールバー・インラインソートのCSS |
-| content/content.js | 2909-3063 | `showTagDropdown()`内のfixedOptionsContainer書き換え |
-| content/content.js | 3477-3484 | `injectFilterUI()`からソートボタン削除 |
-| content/content.js | 2674-2678, 3360-3364 | キーボードナビゲーション更新 |
-
-#### 新規CSSクラス
-- `.nf-dropdown-toolbar` - ドロップダウン内ツールバー
-- `.nf-toolbar-separator` - セパレーター（|）
-- `.nf-inline-sort-selector` - ソートセレクターコンテナ
-- `.nf-inline-sort-btn` - ソートボタン
-- `.nf-inline-sort-menu` - ソートメニュー
-- `.nf-inline-sort-option` - ソートオプション項目
-- `.nf-toolbar-untagged` - コンパクト版タグなしオプション
-- `.nf-toolbar-root` - コンパクト版ルート移動
+実装計画は完成・承認済み。以下の3つのバグを修正する必要がある。
 
 ---
 
-## 仕様詳細
+## 修正すべきバグ
 
-### D&D操作の影響範囲
+### バグ1: タグポップオーバーでの親子関係D&Dが動作しない
 
-| 操作 | 影響範囲 | 使用関数 |
-|------|----------|----------|
-| タグ同士を重ねる（親子関係） | 全プロジェクト | `moveTagToParent()` |
-| タグ間にドロップ（順番変更） | このプロジェクトのみ | `reorderProjectTagsAtIndex()` |
+**問題**: `div.nf-popover`内で子タグを親タグにドラッグしても何も起きない
 
-### 検索時の動作
-- ソートUIは検索時に非表示（`nf-dropdown-fixed-options`が非表示になるため）
-- これはユーザー確認済みで許容
+**原因**: 子タグセクション（`nf-popover-child-tags`、1908-1946行付近）にD&D処理が未実装
 
----
+**修正内容**:
+1. 親タグのdragstartに統一MIME追加（1851-1857行）
+   ```javascript
+   e.dataTransfer.setData('application/x-nf-tag', parentName);
+   ```
 
-## 注意事項
+2. 親タグのdragover/dropを修正（1869-1898行）- `dataTransfer.types.includes('application/x-nf-tag')`で判定
 
-### 重要: 拡張機能の更新方法
-
-**「削除→再読み込み」ではなく「更新」ボタンを使用すること**
-
-- 拡張機能を「削除」するとchrome.storageのデータも削除される（Chromeの仕様）
-- `chrome://extensions` で「更新」ボタン（↻）をクリックすればデータは保持される
-
-### 禁止操作（CLAUDE.mdより）
-- `git push`, `git commit` は実行しない
-- `.env*`, 秘密鍵ファイルは読み書きしない
-
-### 実装上の注意
-- **XSS対策**: ユーザー入力は必ず`textContent`で表示
-- **lastErrorチェック**: 全storage操作で`chrome.runtime.lastError`を確認
-- **stopPropagation**: ドロップイベントは`e.stopPropagation()`で伝播防止
+3. 子タグバッジにD&D属性とイベント追加（1921-1943行付近）
+   ```javascript
+   badge.setAttribute('draggable', 'true');
+   badge.setAttribute('data-full-tag', tag);
+   // dragstart/dragendイベント追加
+   ```
 
 ---
 
-## ファイル構成
+### バグ2: セクション切り替え後にタグフィルターが効かない
 
-```
-NoteFolder/
-├── manifest.json              # Content Script設定済み
-├── content/
-│   ├── content.js             # メインロジック（約3500行）
-│   └── content.css            # スタイル（約1130行）
-├── popup/
-│   ├── popup.html
-│   ├── popup.css
-│   └── popup.js
-├── 実装計画_UI改善v4.md       # 前回の詳細実装計画
-├── TAKEOVER.md                # この引き継ぎドキュメント
-└── CLAUDE.md                  # プロジェクト指示書
-```
+**問題**: `#mat-button-toggle-2-button`等を選択後、`#mat-button-toggle-0-button`に戻るとフィルターが効かない
 
----
+**原因**: `setupSectionToggleListener()`がリスナーを重複登録、`originalCardOrder`が古いDOM参照を保持
 
-## 主要関数リファレンス
+**修正内容**:
+1. setupSectionToggleListener修正（3536-3564行）
+   ```javascript
+   if (toggleGroup.dataset.nfListenerAttached) return;
+   toggleGroup.dataset.nfListenerAttached = 'true';
+   // click内でoriginalCardOrder = []、saveOriginalCardOrder(true)、applyFilters()を追加
+   ```
 
-### 新規追加（今回）
-| 関数名 | 行番号 | 用途 |
-|--------|--------|------|
-| `reorderProjectTagsAtIndex()` | 1116-1186 | 指定位置にタグを移動（順番変更） |
+2. saveOriginalCardOrder修正（2394-2402行）
+   ```javascript
+   function saveOriginalCardOrder(force = false) {
+     if (cards.length > 0 && (force || originalCardOrder.length === 0)) {
+   ```
 
-### 既存（参照用）
-| 関数名 | 行番号 | 用途 |
-|--------|--------|------|
-| `moveTagToParent()` | 1279-1328 | タグの親子関係変更（全プロジェクト） |
-| `reorderProjectTags()` | 1055-1114 | タグ順番変更（別タグの位置へ移動） |
-| `showTagPopover()` | 1692-1970付近 | タグポップオーバー表示 |
-| `showTagDropdown()` | 2774-3400付近 | タグドロップダウン表示 |
-| `injectFilterUI()` | 3420-3500付近 | フィルターUI注入 |
-| `getExpandedTags()` | 195-210 | 展開中タグ配列を取得 |
-| `saveExpandedTags()` | 217-230 | 展開中タグ配列を保存 |
+3. setupSPANavigationListener内でMutationObserver追加（toggleGroup差し替え検知）
 
 ---
 
-## テスト項目
+### バグ3: 同名タグを同じ親の子タグとして統合できない
 
-### 機能1: D&D動作
-- [ ] タグAをタグBの上にドロップ → タグAがタグB/Aになる（全プロジェクト）
-- [ ] タグAをタグB-C間の縦棒にドロップ → タグAがB-C間に移動（このプロジェクトのみ）
-- [ ] ドラッグ中に縦棒が青く表示される
-- [ ] ドラッグ中にターゲットバッジが緑枠で表示される
+**問題**: 「歩行」を「健康」にD&Dすると「同名のタグが既に存在します」エラー（既に「健康/歩行」がある場合）
 
-### 機能2: ソート統合
-- [ ] タグドロップダウン内にソート・タグなし・ルートへが1行表示
-- [ ] ソートをクリック→メニュー展開→選択でソート変更
-- [ ] タグなしをクリック→フィルター適用
-- [ ] ルートへにドラッグ→子タグがルートに移動
-- [ ] 外部のソートボタンが削除されている
+**ユーザー仕様**:
+- 同名タグは**自動統合**（確認ダイアログなし）
+- 色情報: **欠損補完**（targetが無色の場合のみsourceの色を引き継ぐ）
+- フィルター: **targetに置換して維持**
+
+**修正内容**:
+1. `mergeTagsInAllProjects(sourceTag, targetTag)`関数を新規作成（1278行付近）
+   - 子孫リストを先にスナップショット化
+   - 全プロジェクトでsourceTagをtargetTagに置換（Set化で重複除去）
+   - tagMeta欠損補完
+   - フィルター状態を更新
+   - キャッシュ正規化
+
+2. moveTagToParent重複チェック修正（1313-1317行）
+   ```javascript
+   if (allTags.includes(newTagName) && newTagName !== sourceTag) {
+     const success = await mergeTagsInAllProjects(sourceTag, newTagName);
+     if (success) showToast(`「${sourceBaseName}」を「${newTagName}」に統合しました`);
+     return success;
+   }
+   ```
+
+---
+
+## 実装順序
+
+1. **Phase 1**: バグ2（フィルター機能修正）- 基盤機能
+2. **Phase 2**: バグ1（D&D機能追加）
+3. **Phase 3**: バグ3（タグ統合機能）
+
+---
+
+## 重要な行番号リファレンス
+
+| 機能 | 行番号 |
+|------|--------|
+| 子タグセクション | 1908-1946 |
+| 親タグD&D処理 | 1851-1898 |
+| moveTagToParent | 1279-1328 |
+| renameTagInAllProjects | 1336-1376 |
+| removeTagMeta | 320-343 |
+| saveOriginalCardOrder | 2394-2402 |
+| applyFilters | 2429-2481 |
+| setupSectionToggleListener | 3536-3564 |
+| setupSPANavigationListener | 3579-3612 |
 
 ---
 
@@ -174,10 +122,30 @@ NoteFolder/
 | ファイル | 内容 |
 |----------|------|
 | `CLAUDE.md` | プロジェクト指示書、禁止操作 |
-| `実装計画_UI改善v4.md` | 前回実装した機能の詳細計画 |
-| `/home/littl/.claude/plans/harmonic-dreaming-eagle.md` | 今回の実装計画 |
+| `実装計画_バグ修正_v5.md` | 詳細実装計画（Phase形式） |
+
+---
+
+## 注意事項
+
+### Codexレビュー指摘（対応必須）
+- tagMeta上書き問題 → 欠損補完ロジック
+- sync書込制限 → 一括保存
+- 子孫取りこぼし → スナップショット化
+- toggleGroup差し替え → MutationObserver
+- ドラッグ種別明示 → 統一MIME `application/x-nf-tag`
+- フィルター状態 → targetに置換
+
+### 禁止操作
+- `git push`, `git commit` は実行しない
+- `.env*`, 秘密鍵ファイルは読み書きしない
+
+### 実装上の注意
+- XSS対策: `textContent`使用（`innerHTML`禁止）
+- lastErrorチェック: 全storage操作で確認
+- stopPropagation: ドロップイベントは伝播防止
 
 ---
 
 **最終更新**: 2025-12-31
-**ステータス**: 機能更新実装完了・動作確認待ち
+**ステータス**: 実装計画承認済み・実装待ち
