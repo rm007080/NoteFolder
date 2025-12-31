@@ -2,7 +2,7 @@
 
 NotebookLMのプロジェクトをタグで整理・管理できるChrome拡張機能です。
 
-![NoteFolder Screenshot](screenshots/main.png)
+![NoteFolder Screenshot](picture/main.png)
 <!-- スクリーンショットを追加してください -->
 
 ## 特徴
@@ -45,7 +45,7 @@ NotebookLMのプロジェクトをタグで整理・管理できるChrome拡張�
 2. プロジェクト一覧で、各プロジェクトの📁アイコンをクリック
 3. ポップオーバーでタグを入力し「追加」をクリック
 
-![タグ追加](screenshots/add-tag.png)
+![タグ追加](picture/add-tag.png)
 <!-- スクリーンショットを追加してください -->
 
 ### フィルター
@@ -136,11 +136,6 @@ UIが表示されない場合:
 - Chrome Extension Manifest V3
 - Vanilla JavaScript（フレームワーク不使用）
 - chrome.storage.sync API
-
-詳細な設計については以下のドキュメントを参照してください:
-- [要件定義](要件定義..md)
-- [実装計画](実装計画.md)
-- [アーキテクチャ](アーキテクチャ.md)
 
 ## ライセンス
 

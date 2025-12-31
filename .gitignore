@@ -6,6 +6,12 @@
 # スクリーンショット
 screenshots/
 
+# 計画書
+plan/
+
+# メモ
+memo/
+
 # ビルド成果物
 dist/
 build/
