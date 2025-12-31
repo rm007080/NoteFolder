@@ -10,94 +10,126 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 
 ## 現在の状況
 
-### ステータス: 3つのバグ修正実装待ち
+### ステータス: ポップオーバーD&D修正の実装待ち
 
-実装計画は完成・承認済み。以下の3つのバグを修正する必要がある。
+前回セッションで以下を完了：
+- Phase 1: フィルター無効化修正 ✅
+- Phase 2: D&D機能追加（親タグ/子タグ） ✅
+- Phase 3: タグ統合機能（mergeTagsInAllProjects） ✅
 
----
-
-## 修正すべきバグ
-
-### バグ1: タグポップオーバーでの親子関係D&Dが動作しない
-
-**問題**: `div.nf-popover`内で子タグを親タグにドラッグしても何も起きない
-
-**原因**: 子タグセクション（`nf-popover-child-tags`、1908-1946行付近）にD&D処理が未実装
-
-**修正内容**:
-1. 親タグのdragstartに統一MIME追加（1851-1857行）
-   ```javascript
-   e.dataTransfer.setData('application/x-nf-tag', parentName);
-   ```
-
-2. 親タグのdragover/dropを修正（1869-1898行）- `dataTransfer.types.includes('application/x-nf-tag')`で判定
-
-3. 子タグバッジにD&D属性とイベント追加（1921-1943行付近）
-   ```javascript
-   badge.setAttribute('draggable', 'true');
-   badge.setAttribute('data-full-tag', tag);
-   // dragstart/dragendイベント追加
-   ```
+**しかし**、ポップオーバー（`nf-popover`）内でのD&Dが動作しない問題が判明。
 
 ---
 
-### バグ2: セクション切り替え後にタグフィルターが効かない
+## 次に実装すべき内容
 
-**問題**: `#mat-button-toggle-2-button`等を選択後、`#mat-button-toggle-0-button`に戻るとフィルターが効かない
+### 問題: ポップオーバー内D&Dが動作しない
 
-**原因**: `setupSectionToggleListener()`がリスナーを重複登録、`originalCardOrder`が古いDOM参照を保持
+**原因**:
+- ドロップダウンは`data-dragging-tag`属性でドラッグ状態管理
+- ポップオーバーは`application/x-nf-tag` MIMEタイプの存在チェックのみ
+- 自分自身・子孫へのドロップ防止チェックがdragoverにない
 
-**修正内容**:
-1. setupSectionToggleListener修正（3536-3564行）
-   ```javascript
-   if (toggleGroup.dataset.nfListenerAttached) return;
-   toggleGroup.dataset.nfListenerAttached = 'true';
-   // click内でoriginalCardOrder = []、saveOriginalCardOrder(true)、applyFilters()を追加
-   ```
+### 実装計画ファイル
+`実装計画_popover_DnD修正_v6.md` を参照
 
-2. saveOriginalCardOrder修正（2394-2402行）
-   ```javascript
-   function saveOriginalCardOrder(force = false) {
-     if (cards.length > 0 && (force || originalCardOrder.length === 0)) {
-   ```
+### 修正箇所（6箇所）
 
-3. setupSPANavigationListener内でMutationObserver追加（toggleGroup差し替え検知）
+**対象ファイル**: `content/content.js`
+
+| # | 対象 | 行番号 | 修正内容 |
+|---|------|--------|----------|
+| 1 | 親タグ dragstart | 1955-1962 | `popover.setAttribute('data-dragging-tag', parentName)` 追加 |
+| 2 | 親タグ dragend | 1964-1972 | `popover.removeAttribute('data-dragging-tag')` 追加 |
+| 3 | 親タグ dragover | 1975-1983 | `data-dragging-tag`で自己・子孫チェック、`dropEffect='move'`に変更 |
+| 4 | 親タグ drop | 1989-2011 | `popover.removeAttribute('data-dragging-tag')` 追加 |
+| 5 | 子タグ dragstart | 2055-2064 | `popover.setAttribute('data-dragging-tag', tag)` 追加 |
+| 6 | 子タグ dragend | 2066-2071 | `popover.removeAttribute('data-dragging-tag')` 追加 |
+
+### 具体的な修正コード
+
+#### 修正1: 親タグ dragstart（1955行付近）
+```javascript
+// 既存コードの最後に追加
+popover.setAttribute('data-dragging-tag', parentName);
+```
+
+#### 修正2: 親タグ dragend（1964行付近）
+```javascript
+// draggedParent = null; の後に追加
+popover.removeAttribute('data-dragging-tag');
+```
+
+#### 修正3: 親タグ dragover（1975行付近）
+```javascript
+// 全体を置換
+badge.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  const draggingTag = popover.getAttribute('data-dragging-tag');
+  if (draggingTag &&
+      parentName !== draggingTag &&
+      !parentName.startsWith(draggingTag + HIERARCHY_SEPARATOR)) {
+    e.dataTransfer.dropEffect = 'move';
+    badge.classList.add('nf-parent-drop-target');
+  }
+});
+```
+
+#### 修正4: 親タグ drop（1989行付近）
+```javascript
+// badge.classList.remove('nf-parent-drop-target'); の後に追加
+popover.removeAttribute('data-dragging-tag');
+```
+
+#### 修正5: 子タグ dragstart（2055行付近）
+```javascript
+// 既存コードの最後に追加
+popover.setAttribute('data-dragging-tag', tag);
+```
+
+#### 修正6: 子タグ dragend（2066行付近）
+```javascript
+// badge.classList.remove('nf-dragging'); の後に追加
+popover.removeAttribute('data-dragging-tag');
+```
 
 ---
 
-### バグ3: 同名タグを同じ親の子タグとして統合できない
+## Codexレビュー指摘（対応済み）
 
-**問題**: 「歩行」を「健康」にD&Dすると「同名のタグが既に存在します」エラー（既に「健康/歩行」がある場合）
-
-**ユーザー仕様**:
-- 同名タグは**自動統合**（確認ダイアログなし）
-- 色情報: **欠損補完**（targetが無色の場合のみsourceの色を引き継ぐ）
-- フィルター: **targetに置換して維持**
-
-**修正内容**:
-1. `mergeTagsInAllProjects(sourceTag, targetTag)`関数を新規作成（1278行付近）
-   - 子孫リストを先にスナップショット化
-   - 全プロジェクトでsourceTagをtargetTagに置換（Set化で重複除去）
-   - tagMeta欠損補完
-   - フィルター状態を更新
-   - キャッシュ正規化
-
-2. moveTagToParent重複チェック修正（1313-1317行）
-   ```javascript
-   if (allTags.includes(newTagName) && newTagName !== sourceTag) {
-     const success = await mergeTagsInAllProjects(sourceTag, newTagName);
-     if (success) showToast(`「${sourceBaseName}」を「${newTagName}」に統合しました`);
-     return success;
-   }
-   ```
+| 重要度 | 問題 | 対処 |
+|--------|------|------|
+| P1 | `dropEffect='link'`が`effectAllowed='move'`と不整合 | `dropEffect='move'`に統一 |
+| P2 | `dragend`未発火時に属性が残る | `drop`でも属性クリア追加 |
 
 ---
 
-## 実装順序
+## 完了済みの実装
 
-1. **Phase 1**: バグ2（フィルター機能修正）- 基盤機能
-2. **Phase 2**: バグ1（D&D機能追加）
-3. **Phase 3**: バグ3（タグ統合機能）
+### Phase 1: フィルター無効化修正
+- `saveOriginalCardOrder(force)`に強制更新オプション追加
+- `setupSectionToggleListener()`にdataset重複防止、applyFilters()追加
+- `setupSPANavigationListener()`にMutationObserver追加
+
+### Phase 2: D&D機能追加
+- 親タグdragstartに統一MIME追加
+- 親タグdragover/dropに循環参照チェック追加
+- 子タグにD&D属性・イベント追加
+
+### Phase 3: タグ統合機能
+- `mergeTagsInAllProjects(sourceTag, targetTag)`関数を新規作成（1273-1367行）
+- `moveTagToParent()`の重複チェックを自動統合に修正（1409-1416行）
+
+---
+
+## テスト項目
+
+### ポップオーバーD&D修正後
+- [ ] nf-popover内で「歩行」を「健康」にD&D（親→親）
+- [ ] nf-popover内で「健康/運動」を「趣味」にD&D（子→親）
+- [ ] 自分自身へのD&Dがドロップターゲットにならない
+- [ ] 自分の子孫へのD&Dがドロップターゲットにならない
+- [ ] 同名タグへのD&Dで自動統合される
 
 ---
 
@@ -105,15 +137,12 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 
 | 機能 | 行番号 |
 |------|--------|
-| 子タグセクション | 1908-1946 |
-| 親タグD&D処理 | 1851-1898 |
-| moveTagToParent | 1279-1328 |
-| renameTagInAllProjects | 1336-1376 |
-| removeTagMeta | 320-343 |
-| saveOriginalCardOrder | 2394-2402 |
-| applyFilters | 2429-2481 |
-| setupSectionToggleListener | 3536-3564 |
-| setupSPANavigationListener | 3579-3612 |
+| mergeTagsInAllProjects | 1273-1367 |
+| moveTagToParent | 1375-1427 |
+| ポップオーバー親タグセクション | 1886-2019 |
+| ポップオーバー子タグセクション | 2021-1974 |
+| setupSectionToggleListener | 3537-3576 |
+| setupSPANavigationListener | 3591-3657 |
 
 ---
 
@@ -122,19 +151,12 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 | ファイル | 内容 |
 |----------|------|
 | `CLAUDE.md` | プロジェクト指示書、禁止操作 |
-| `実装計画_バグ修正_v5.md` | 詳細実装計画（Phase形式） |
+| `実装計画_popover_DnD修正_v6.md` | 今回の修正計画（詳細） |
+| `実装計画_バグ修正_v5.md` | 前回の修正計画（完了） |
 
 ---
 
 ## 注意事項
-
-### Codexレビュー指摘（対応必須）
-- tagMeta上書き問題 → 欠損補完ロジック
-- sync書込制限 → 一括保存
-- 子孫取りこぼし → スナップショット化
-- toggleGroup差し替え → MutationObserver
-- ドラッグ種別明示 → 統一MIME `application/x-nf-tag`
-- フィルター状態 → targetに置換
 
 ### 禁止操作
 - `git push`, `git commit` は実行しない
@@ -143,9 +165,9 @@ NotebookLMのプロジェクト一覧ページでタグ管理を行うChrome拡�
 ### 実装上の注意
 - XSS対策: `textContent`使用（`innerHTML`禁止）
 - lastErrorチェック: 全storage操作で確認
-- stopPropagation: ドロップイベントは伝播防止
+- `isStorageAvailable()`チェック: 拡張機能更新後のエラー防止
 
 ---
 
 **最終更新**: 2025-12-31
-**ステータス**: 実装計画承認済み・実装待ち
+**ステータス**: ポップオーバーD&D修正の実装待ち

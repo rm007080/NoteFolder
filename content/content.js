@@ -289,6 +289,11 @@ function loadTagMetaFromItems(items) {
  */
 async function saveTagMeta(tagName, data) {
   return new Promise((resolve) => {
+    if (!isStorageAvailable()) {
+      console.warn('Storage not available - extension may need reload');
+      resolve(false);
+      return;
+    }
     const shardKey = `tagMeta:${getShardKey(tagName)}`;
     chrome.storage.sync.get({ [shardKey]: {} }, (result) => {
       if (chrome.runtime.lastError) {
@@ -1271,6 +1276,102 @@ async function removeTagFromAllProjects(tagToRemove, skipConfirm = false) {
 }
 
 /**
+ * タグを統合する（sourceTagの紐付けをtargetTagに移動し、sourceTagを削除）
+ * @param {string} sourceTag - 統合元タグ（削除される）
+ * @param {string} targetTag - 統合先タグ（残る）
+ * @returns {Promise<boolean>}
+ */
+async function mergeTagsInAllProjects(sourceTag, targetTag) {
+  if (sourceTag === targetTag) return false;
+
+  // 0. 子孫リストを先にスナップショット化（メタ削除前に取得）
+  const allTags = getAllTagNames();
+  const childTags = allTags.filter(t => t.startsWith(sourceTag + HIERARCHY_SEPARATOR));
+
+  const projectUpdates = {};
+  const metaToRemove = [];
+
+  // 1. 全プロジェクトでsourceTagをtargetTagに置換
+  for (const [projectId, project] of cache.projects) {
+    if (project.tags && project.tags.includes(sourceTag)) {
+      let updatedTags = [...project.tags];
+      const sourceIndex = updatedTags.indexOf(sourceTag);
+
+      if (updatedTags.includes(targetTag)) {
+        // targetTagが既にある場合はsourceTagを削除
+        updatedTags.splice(sourceIndex, 1);
+      } else {
+        // targetTagがない場合はsourceTagをtargetTagに置換
+        updatedTags[sourceIndex] = targetTag;
+      }
+
+      // 重複除去（Set化）
+      updatedTags = [...new Set(updatedTags)];
+
+      project.tags = updatedTags;
+      projectUpdates[`project:${projectId}`] = { ...project, updatedAt: Date.now() };
+    }
+  }
+
+  // 2. tagMeta欠損補完（targetが無色の場合のみsourceの色を引き継ぐ）
+  const sourceMeta = cache.tagMeta[sourceTag];
+  const targetMeta = cache.tagMeta[targetTag];
+  if (sourceMeta && sourceMeta.color && (!targetMeta || !targetMeta.color)) {
+    await saveTagMeta(targetTag, { color: sourceMeta.color });
+  }
+
+  // 3. sourceTagのメタデータを削除対象に追加
+  metaToRemove.push(`tagMeta:${sourceTag}`);
+  delete cache.tagMeta[sourceTag];
+
+  // 4. sourceTagの子タグも再帰的に処理（スナップショットを使用）
+  for (const childTag of childTags) {
+    const suffix = childTag.substring(sourceTag.length);
+    const newChildTag = targetTag + suffix;
+
+    if (allTags.includes(newChildTag)) {
+      // 同名の子タグが存在する場合は統合
+      await mergeTagsInAllProjects(childTag, newChildTag);
+    } else {
+      // 存在しない場合はリネーム
+      await renameTagInAllProjects(childTag, newChildTag);
+    }
+  }
+
+  // 5. ストレージに一括保存（クォータ対策）
+  if (Object.keys(projectUpdates).length > 0 && isStorageAvailable()) {
+    await new Promise((resolve) => {
+      chrome.storage.sync.set(projectUpdates, () => {
+        if (chrome.runtime.lastError) {
+          console.error('Tag merge error:', chrome.runtime.lastError.message);
+        }
+        resolve();
+      });
+    });
+  }
+
+  // 6. メタデータの削除
+  if (metaToRemove.length > 0 && isStorageAvailable()) {
+    await new Promise(resolve => chrome.storage.sync.remove(metaToRemove, resolve));
+  }
+
+  // 7. フィルター状態を更新（sourceをtargetに置換）
+  if (selectedFilterTags.includes(sourceTag)) {
+    const idx = selectedFilterTags.indexOf(sourceTag);
+    if (!selectedFilterTags.includes(targetTag)) {
+      selectedFilterTags[idx] = targetTag;
+    } else {
+      selectedFilterTags.splice(idx, 1);
+    }
+  }
+
+  // 8. キャッシュの正規化
+  cache.allTags = normalizeAllTags(getAllTagNames());
+
+  return true;
+}
+
+/**
  * タグを別のタグの子として移動（子タグも一緒に移動）
  * @param {string} sourceTag - 移動するタグ
  * @param {string} targetParent - 移動先の親タグ（nullでルートへ）
@@ -1310,10 +1411,13 @@ async function moveTagToParent(sourceTag, targetParent) {
     return false;
   }
 
-  // 重複チェック
+  // 重複チェック（同名タグが存在する場合は自動統合）
   if (allTags.includes(newTagName) && newTagName !== sourceTag) {
-    showToast('同名のタグが既に存在します');
-    return false;
+    const success = await mergeTagsInAllProjects(sourceTag, newTagName);
+    if (success) {
+      showToast(`「${sourceBaseName}」を「${newTagName}」に統合しました`);
+    }
+    return success;
   }
 
   // 各タグを新しい名前にリネーム
@@ -1853,6 +1957,7 @@ function showTagPopover(targetElement, projectId) {
             badge.classList.add('nf-dragging');
             parentSection.classList.add('nf-dragging-active');
             e.dataTransfer.setData('text/plain', parentName);
+            e.dataTransfer.setData('application/x-nf-tag', parentName);  // 統一MIME追加
             e.dataTransfer.effectAllowed = 'move';
           });
 
@@ -1869,7 +1974,9 @@ function showTagPopover(targetElement, projectId) {
           // バッジ上へのドロップ = 親子関係を設定（全プロジェクトに影響）
           badge.addEventListener('dragover', (e) => {
             e.preventDefault();
-            if (draggedParent && draggedParent !== parentName) {
+            // 統一MIMEで判定（親/子両方対応）
+            if (e.dataTransfer.types.includes('application/x-nf-tag')) {
+              // 自分自身以外ならドロップ可能
               e.dataTransfer.dropEffect = 'link'; // 親子関係は「リンク」
               badge.classList.add('nf-parent-drop-target');
             }
@@ -1883,8 +1990,14 @@ function showTagPopover(targetElement, projectId) {
             e.preventDefault();
             e.stopPropagation();
             badge.classList.remove('nf-parent-drop-target');
+
             const dragged = e.dataTransfer.getData('text/plain');
             if (dragged && dragged !== parentName) {
+              // 循環参照防止: 自分の子孫には移動できない
+              if (parentName.startsWith(dragged + HIERARCHY_SEPARATOR)) {
+                showToast('子タグの中には移動できません');
+                return;
+              }
               // 親子関係を設定: draggedをparentNameの子にする（全プロジェクトに影響）
               const success = await moveTagToParent(dragged, parentName);
               if (success) {
@@ -1937,6 +2050,24 @@ function showTagPopover(targetElement, projectId) {
             },
             displayName: displayName,
             tooltipText: tag
+          });
+
+          // 子タグにもD&D属性とイベントを追加
+          badge.setAttribute('draggable', 'true');
+          badge.setAttribute('data-full-tag', tag);
+
+          badge.addEventListener('dragstart', (e) => {
+            badge.classList.add('nf-dragging');
+            e.dataTransfer.setData('text/plain', tag);  // フルパス
+            e.dataTransfer.setData('application/x-nf-tag', tag);  // 統一MIME
+            e.dataTransfer.effectAllowed = 'move';
+          });
+
+          badge.addEventListener('dragend', () => {
+            badge.classList.remove('nf-dragging');
+            document.querySelectorAll('.nf-parent-drop-target').forEach(el => {
+              el.classList.remove('nf-parent-drop-target');
+            });
           });
 
           childList.appendChild(badge);
@@ -2393,10 +2524,11 @@ function getProjectCards() {
 
 /**
  * 元のカード順序を保存
+ * @param {boolean} force - trueの場合、既存の配列があっても強制更新
  */
-function saveOriginalCardOrder() {
+function saveOriginalCardOrder(force = false) {
   const cards = Array.from(getProjectCards());
-  if (cards.length > 0 && originalCardOrder.length === 0) {
+  if (cards.length > 0 && (force || originalCardOrder.length === 0)) {
     originalCardOrder = cards;
   }
 }
@@ -3542,23 +3674,34 @@ function setupSectionToggleListener() {
     return;
   }
 
+  // 要素単位でリスナー設定済みかチェック（重複防止）
+  if (toggleGroup.dataset.nfListenerAttached) return;
+  toggleGroup.dataset.nfListenerAttached = 'true';
+
   // クリックイベントを監視（キャプチャフェーズで）
   toggleGroup.addEventListener('click', () => {
+    // DOM参照をリセット（古いカード参照を破棄）
+    originalCardOrder = [];
+
     // 少し遅延してからフォルダアイコンを再注入（DOMの更新を待つ）
     setTimeout(() => {
+      saveOriginalCardOrder(true);  // 強制更新
       injectAllFolderIcons();
       // フォルダアイコンの状態を更新
       for (const [projectId] of cache.projects) {
         updateFolderIconState(projectId);
       }
+      applyFilters();  // フィルター再適用
     }, 300);
 
     // さらに遅延して再度チェック（SPAの遅延読み込み対応）
     setTimeout(() => {
+      saveOriginalCardOrder(true);  // 強制更新
       injectAllFolderIcons();
       for (const [projectId] of cache.projects) {
         updateFolderIconState(projectId);
       }
+      applyFilters();  // フィルター再適用
     }, 800);
   }, { capture: true });
 }
@@ -3622,6 +3765,26 @@ function setupSPANavigationListener() {
     // 初回は300ms後に開始
     setTimeout(() => tryReinject(), 300);
   }
+
+  // toggleGroup差し替え検知用のMutationObserver
+  // SPAでDOMが再生成された場合にリスナーを再設定する
+  const toggleGroupObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.type === 'childList') {
+        // toggleGroupが再生成された場合、リスナーを再設定
+        const newToggleGroup = document.querySelector('mat-button-toggle-group.project-section-toggle');
+        if (newToggleGroup && !newToggleGroup.dataset.nfListenerAttached) {
+          setupSectionToggleListener();
+        }
+      }
+    }
+  });
+
+  // body全体を監視（subtreeで子孫の変更も検知）
+  toggleGroupObserver.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
 }
 
 // ========================================
