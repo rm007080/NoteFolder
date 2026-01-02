@@ -3,7 +3,6 @@
 NotebookLMのプロジェクトをタグで整理・管理できるChrome拡張機能です。
 
 ![NoteFolder Screenshot](picture/main.png)
-<!-- スクリーンショットを追加してください -->
 
 ## 特徴
 
