@@ -1,150 +1,151 @@
 # NoteFolder
 
-NotebookLMのプロジェクトをタグで整理・管理できるChrome拡張機能です。
+*Read this in other languages: [日本語](README.ja.md)*
+
+A Chrome extension for organizing and managing NotebookLM projects with tags.
 
 ![NoteFolder Screenshot](picture/main.png)
 
-## 特徴
+## Features
 
-- **タグ付け**: 各プロジェクトに複数のタグを自由に追加
-- **階層タグ**: 親子関係を持つタグで整理（例: 仕事/プロジェクトA）
-- **ドラッグ&ドロップ**: タグをD&Dで親子関係を変更・統合
-- **フィルター**: タグでプロジェクトを絞り込み表示
-- **ソート**: 名前順、タグ数順で並び替え
-- **同期**: Chromeアカウント間でタグ情報を自動同期
-- **軽量**: 外部サーバー不要、ローカルで完結
+- **Tagging**: Add multiple tags to each project freely
+- **Hierarchical Tags**: Organize with parent-child relationships (e.g., Work/ProjectA)
+- **Drag & Drop**: Change parent-child relationships and merge tags via D&D
+- **Filtering**: Filter projects by tags
+- **Sorting**: Sort by name or tag count
+- **Sync**: Automatically sync tag information across Chrome accounts
+- **Lightweight**: No external server required, works locally
 
-## インストール方法
+## Installation
 
-### 方法1: GitHub Releasesからダウンロード（推奨）
+### Method 1: From GitHub Releases (Recommended)
 
-1. [Releases](https://github.com/rm007080/NoteFolder/releases/tag/v1.0.0)ページから最新版のZIPファイルをダウンロード
-2. ZIPファイルを展開（解凍）
-3. Chromeで `chrome://extensions` を開く
-4. 右上の「デベロッパーモード」をONにする
-5. 「パッケージ化されていない拡張機能を読み込む」をクリック
-6. 展開したフォルダを選択
+1. Download the latest ZIP file from the [Releases](https://github.com/rm007080/NoteFolder/releases/tag/v1.0.0) page
+2. Extract the ZIP file
+3. Open `chrome://extensions` in Chrome
+4. Enable "Developer mode" in the top right
+5. Click "Load unpacked"
+6. Select the extracted folder
 
-### 方法2: ソースコードから
+### Method 2: From Source Code
 
-1. このリポジトリをクローンまたはダウンロード
+1. Clone or download this repository
    ```bash
    git clone https://github.com/rm007080/NoteFolder.git
    ```
-2. Chromeで `chrome://extensions` を開く
-3. 右上の「デベロッパーモード」をONにする
-4. 「パッケージ化されていない拡張機能を読み込む」をクリック
-5. クローンしたフォルダを選択
+2. Open `chrome://extensions` in Chrome
+3. Enable "Developer mode" in the top right
+4. Click "Load unpacked"
+5. Select the cloned folder
 
-## 使い方
+## Usage
 
-### タグの追加
+### Adding Tags
 
-1. [NotebookLM](https://notebooklm.google.com/)を開く
-2. プロジェクト一覧で、各プロジェクトの📁アイコンをクリック
-3. ポップオーバーでタグを入力し「追加」をクリック
+1. Open [NotebookLM](https://notebooklm.google.com/)
+2. Click the 📁 icon on each project in the project list
+3. Enter a tag in the popover and click "Add"
 
-![タグ追加](picture/add-tag.png)
-<!-- スクリーンショットを追加してください -->
+![Add Tag](picture/add-tag.png)
 
-### フィルター
+### Filtering
 
-1. ページ上部の「🏷️ タグ ▼」ボタンをクリック
-2. 絞り込みたいタグを選択
-3. 選択したタグを持つプロジェクトのみ表示されます
+1. Click the "🏷️ Tags ▼" button at the top of the page
+2. Select the tag you want to filter by
+3. Only projects with the selected tag will be displayed
 
-### ソート
+### Sorting
 
-1. ページ上部の「📊 デフォルト ▼」ボタンをクリック
-2. 並び順を選択
-   - デフォルト: NotebookLMの標準順
-   - 名前順 (A→Z / Z→A)
-   - タグ数 (多→少)
+1. Click the "📊 Default ▼" button at the top of the page
+2. Select sort order
+   - Default: NotebookLM's standard order
+   - Name (A→Z / Z→A)
+   - Tag count (More→Less)
 
-### タグの削除
+### Deleting Tags
 
-**プロジェクトからタグを外す場合:**
-- 📁アイコン → タグ横の×をクリック
+**To remove a tag from a project:**
+- Click 📁 icon → Click × next to the tag
 
-**タグ自体を完全に削除する場合:**
-- 「🏷️ タグ ▼」→ タグ横の×をクリック → 確認ダイアログでOK
+**To completely delete a tag:**
+- Click "🏷️ Tags ▼" → Click × next to the tag → Confirm in the dialog
 
-### タグの階層化（ドラッグ&ドロップ）
+### Hierarchical Tags (Drag & Drop)
 
-1. 📁アイコンをクリックしてポップオーバーを開く
-2. タグをドラッグして別のタグにドロップ
-3. ドロップ先のタグの子タグになります（例: 「運動」を「健康」にドロップ → 「健康/運動」）
+1. Click the 📁 icon to open the popover
+2. Drag a tag and drop it onto another tag
+3. It becomes a child tag of the drop target (e.g., drop "Exercise" on "Health" → "Health/Exercise")
 
-**同名タグへのドロップ:**
-- 同じ名前のタグへドロップすると、全プロジェクトでタグが自動統合されます
+**Dropping on same-name tags:**
+- Dropping on a tag with the same name automatically merges tags across all projects
 
-## 注意事項
+## Notes
 
-- **対応ブラウザ**: Google Chrome（Chromiumベースのブラウザでも動作する可能性あり）
-- **対応サイト**: NotebookLM（https://notebooklm.google.com/）のみ
-- **データ保存**: chrome.storage.sync（Googleアカウントに紐づいて同期）
-- **外部通信**: 一切行いません（プライバシー安全）
+- **Supported Browser**: Google Chrome (may work on Chromium-based browsers)
+- **Supported Site**: NotebookLM (https://notebooklm.google.com/) only
+- **Data Storage**: chrome.storage.sync (synced with your Google account)
+- **External Communication**: None (privacy-safe)
 
-## 免責事項
+## Disclaimer
 
-本拡張機能はGoogleまたはNotebookLMの公式プロダクトではありません。
-サードパーティによる非公式ツールです。
+This extension is not an official product of Google or NotebookLM.
+It is an unofficial third-party tool.
 
-## 権限について
+## Permissions
 
-本拡張は必要最小限の権限のみを使用します。
+This extension uses only the minimum necessary permissions:
 
-- `storage`: タグ情報・色・ピン留め状態などの保存
-- `host_permissions`（`https://notebooklm.google.com/*`）: NotebookLM上でのみUIを注入
+- `storage`: Store tag information, colors, pin status, etc.
+- `host_permissions` (`https://notebooklm.google.com/*`): Inject UI only on NotebookLM
 
-## プライバシー
+## Privacy
 
-- 外部サーバーは使用しません
-- データは `chrome.storage.sync` のみへ保存され、外部送信は行いません
+- No external servers are used
+- Data is stored only in `chrome.storage.sync` and is not transmitted externally
 
-## 保存されるデータ
+## Stored Data
 
-`chrome.storage.sync` に以下が保存されます。
+The following data is stored in `chrome.storage.sync`:
 
-- プロジェクトID
-- プロジェクト名（NotebookLMの画面から取得）
-- タグ（階層タグを含む）
-- タグ色
-- ピン留め状態
-- UI設定（ドロップダウン高さ・展開状態など）
+- Project ID
+- Project name (retrieved from NotebookLM's screen)
+- Tags (including hierarchical tags)
+- Tag colors
+- Pin status
+- UI settings (dropdown height, expanded state, etc.)
 
-## 既知の制限事項
+## Known Limitations
 
-- NotebookLMのDOM構造変更により、動作しなくなる可能性があります
-- Chrome同期は数秒遅れて反映される場合があります
-- Chrome同期ストレージには容量・キー数などの制限があります
+- May stop working if NotebookLM's DOM structure changes
+- Chrome sync may take a few seconds to reflect
+- Chrome sync storage has capacity and key count limitations
 
-## トラブルシュート
+## Troubleshooting
 
-UIが表示されない場合:
-1. `https://notebooklm.google.com/` を開いているか確認
-2. `chrome://extensions` でNoteFolderの「更新」をクリック
-3. NotebookLMのページを再読み込み
+If the UI is not displayed:
+1. Verify you are on `https://notebooklm.google.com/`
+2. Click "Reload" for NoteFolder in `chrome://extensions`
+3. Reload the NotebookLM page
 
-同期が反映されない場合:
-- 数秒待つか、ページを再読み込みしてください
+If sync is not reflected:
+- Wait a few seconds or reload the page
 
-## アンインストールとデータ削除
+## Uninstallation and Data Deletion
 
-- 拡張を削除しても、同期データはChrome側に残る場合があります
-- 完全に削除する場合は、Chromeの同期設定から拡張データを削除してください
+- Sync data may remain on Chrome's side even after removing the extension
+- To completely delete, remove extension data from Chrome's sync settings
 
-## 開発者向け情報
+## For Developers
 
-技術スタック:
+Tech Stack:
 - Chrome Extension Manifest V3
-- Vanilla JavaScript（フレームワーク不使用）
+- Vanilla JavaScript (no frameworks)
 - chrome.storage.sync API
 
-## ライセンス
+## License
 
-MIT License - 詳細は[LICENSE](LICENSE)を参照
+MIT License - See [LICENSE](LICENSE) for details
 
-## フィードバック
+## Feedback
 
-バグ報告や機能要望は[Issues](../../issues)からお願いします。
+Please report bugs or feature requests via [Issues](../../issues).
