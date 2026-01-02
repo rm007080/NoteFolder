@@ -18,7 +18,7 @@ NotebookLMのプロジェクトをタグで整理・管理できるChrome拡張�
 
 ### 方法1: GitHub Releasesからダウンロード（推奨）
 
-1. [Releases](../../releases)ページから最新版のZIPファイルをダウンロード
+1. [Releases](https://github.com/rm007080/NoteFolder/releases/tag/v1.0.0)ページから最新版のZIPファイルをダウンロード
 2. ZIPファイルを展開（解凍）
 3. Chromeで `chrome://extensions` を開く
 4. 右上の「デベロッパーモード」をONにする
@@ -84,6 +84,11 @@ NotebookLMのプロジェクトをタグで整理・管理できるChrome拡張�
 - **対応サイト**: NotebookLM（https://notebooklm.google.com/）のみ
 - **データ保存**: chrome.storage.sync（Googleアカウントに紐づいて同期）
 - **外部通信**: 一切行いません（プライバシー安全）
+
+## 免責事項
+
+本拡張機能はGoogleまたはNotebookLMの公式プロダクトではありません。
+サードパーティによる非公式ツールです。
 
 ## 権限について
 
